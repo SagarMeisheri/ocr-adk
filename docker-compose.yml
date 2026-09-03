@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  truly-tally-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GEMINI_MODEL=gemini-2.5-flash
+      - DB_PATH=/app/data/truly_tally.db
+    volumes:
+      - ./data:/app/data
+      - ./uploads:/app/uploads
+    restart: unless-stopped

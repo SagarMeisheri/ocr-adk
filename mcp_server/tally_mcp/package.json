@@ -1,0 +1,10 @@
+{
+  "name": "tally-mcp-server",
+  "version": "7.5.0",
+  "description": "Tally Prime MCP Server for Google ADK and LLM clients",
+  "type": "module",
+  "main": "dist/index.mjs",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4"
+  }
+}
