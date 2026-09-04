@@ -21,7 +21,9 @@ from .models import (
     InvoiceSummary,
     BankStatement,
     ParsedDocument,
+    ValidationTask,
 )
+from .markdown_parser import parse_invoice_line_items_from_markdown
 
 DOCUMENT_TRANSCRIPTION_PROMPT = """You are a document transcription engine.
 Transcribe the provided document directly into Markdown while strictly preserving its visual layout, reading order, and tabular formats.
@@ -30,7 +32,8 @@ Rules:
 1. Represent side-by-side panels (like Vendor vs. Customer details, or Metadata grids) using multi-column Markdown tables.
 2. Render line-item sections as standard Markdown tables matching the original column structure exactly.
 3. Keep multiline item descriptions grouped within the same table cell using `<br>` tags rather than creating detached empty rows.
-4. Transcribe all text, numbers, labels, and footer blocks verbatim. Do not omit, calculate, or summarize any details."""
+4. Transcribe all text, numbers, labels, and footer blocks verbatim. Do not omit, calculate, or summarize any details.
+5. In addition to transcription, evaluate and plan all necessary mathematical, tax compliance, and database verification checks needed before importing into Tally (e.g. quantity x rate checks, grand total checks, GSTIN checks, duplicate invoice checks)."""
 
 
 class HybridExtractor:
@@ -262,6 +265,8 @@ class HybridExtractor:
         if self.media_resolution:
             tags.append(f"res:{self.media_resolution}")
 
+        validation_plan = generate_document_validation_plan(raw_markdown, stem_title)
+
         return ParsedDocument(
             doc_type="document",
             title=stem_title,
@@ -270,17 +275,21 @@ class HybridExtractor:
             thoughts_token_count=thoughts_token_count,
             confidence_score=0.99,
             tags=tags,
+            validation_plan=validation_plan,
             status="extracted",
         )
 
     def extract_invoice(self, file_path: str, pdf_info: Optional[Dict[str, Any]] = None) -> ExtractedInvoice:
-        """Transcribes document and returns ExtractedInvoice with raw_markdown."""
+        """Transcribes document and returns ExtractedInvoice with raw_markdown and validation_plan."""
         parsed = self.extract_universal_document(file_path)
+        items = parse_invoice_line_items_from_markdown(parsed.raw_markdown)
         return ExtractedInvoice(
             invoice_number=parsed.document_number,
             supplier=InvoiceParty(name=parsed.title),
             summary=InvoiceSummary(),
+            line_items=items,
             raw_markdown=parsed.raw_markdown,
+            validation_plan=parsed.validation_plan,
         )
 
     def extract_bank_statement(self, file_path: str, pdf_info: Optional[Dict[str, Any]] = None) -> BankStatement:
@@ -294,6 +303,89 @@ class HybridExtractor:
     def process_document(self, file_path: str) -> Tuple[str, Union[ExtractedInvoice, BankStatement]]:
         inv = self.extract_invoice(file_path)
         return "document", inv
+
+
+def generate_document_validation_plan(raw_markdown: str, doc_title: str) -> List[ValidationTask]:
+    """Dynamically generates the validation checklist based on document transcription content."""
+    import re
+    tasks: List[ValidationTask] = []
+
+    has_tables = "|" in raw_markdown
+    has_math_indicators = bool(re.search(r"(?i)(qty|quantity|rate|price|amount|taxable)", raw_markdown))
+    has_gst_indicators = bool(re.search(r"(?i)(gstin|gst|cgst|sgst|igst)", raw_markdown))
+    has_totals = bool(re.search(r"(?i)(total|grand\s*total|subtotal)", raw_markdown))
+
+    if has_tables or has_math_indicators:
+        tasks.append(
+            ValidationTask(
+                rule_id="math_line_item_multiplication",
+                name="Line Item Quantity × Rate Validation",
+                category="math",
+                description="Checks amount = quantity × rate (- discount) for every extracted item before sync",
+                status="pending",
+            )
+        )
+        tasks.append(
+            ValidationTask(
+                rule_id="math_taxable_subtotal",
+                name="Subtotal Sum Verification",
+                category="math",
+                description="Verifies sum of line item taxable amounts matches invoice subtotal",
+                status="pending",
+            )
+        )
+
+    if has_gst_indicators:
+        tasks.append(
+            ValidationTask(
+                rule_id="compliance_gstin_checksum",
+                name="GSTIN Format & Luhn Checksum",
+                category="compliance",
+                description="Validates supplier and buyer 15-character GSTIN structure, state codes, and Luhn mod-36 check digits",
+                status="pending",
+            )
+        )
+        tasks.append(
+            ValidationTask(
+                rule_id="math_tax_rates",
+                name="Tax Calculation & State Rules",
+                category="math",
+                description="Validates CGST/SGST vs IGST tax split and calculates exact percentage rates",
+                status="pending",
+            )
+        )
+        tasks.append(
+            ValidationTask(
+                rule_id="tally_party_lookup",
+                name="Tally Database Party Ledger Lookup",
+                category="tally",
+                description="Queries Tally database/virtual simulator to match party by GSTIN or company name",
+                status="pending",
+            )
+        )
+
+    if has_totals:
+        tasks.append(
+            ValidationTask(
+                rule_id="math_grand_total",
+                name="Grand Total Balance Equation",
+                category="math",
+                description="Checks taxable + taxes + cess + round-off equals final payable grand total",
+                status="pending",
+            )
+        )
+
+    tasks.append(
+        ValidationTask(
+            rule_id="tally_duplicate_check",
+            name="Tally Duplicate Invoice Check",
+            category="tally",
+            description="Queries Tally to verify this invoice number is not already recorded",
+            status="pending",
+        )
+    )
+
+    return tasks
 
 
 InvoiceExtractor = HybridExtractor

@@ -14,6 +14,10 @@ import {
   Info,
   Layers,
   Cpu,
+  Calculator,
+  Database,
+  RotateCcw,
+  Zap,
 } from 'lucide-react';
 
 interface WorkflowGraphProps {
@@ -30,34 +34,55 @@ const DEFAULT_STEPS: Array<{
   stage: number;
   description: string;
   icon: any;
+  execution_pattern: string;
 }> = [
   {
     step_id: 'document_ingestion',
     name: 'Ingestion & Normalization',
     stage: 1,
-    description: 'PyPDF parsing, rasterization, and format validation',
+    description: 'Deterministic PyMuPDF parsing, SHA-256 fingerprinting & format validation',
     icon: FileCode,
+    execution_pattern: 'Deterministic Single-Pass',
   },
   {
     step_id: 'gemini_multimodal_extraction',
-    name: 'Gemini 3.8 Flash Vision (Single-Pass)',
+    name: 'Gemini Multimodal Transcription',
     stage: 2,
-    description: 'Single prompt: classifies doc type AND extracts entities/tables',
+    description: 'Markdown transcription & dynamic validation checklist generation',
     icon: Sparkles,
+    execution_pattern: 'Single-Turn Structured',
   },
   {
-    step_id: 'deterministic_validation',
-    name: 'Deterministic Math & GSTIN Validator',
+    step_id: 'math_validation_agent',
+    name: 'Math Validation Agent',
     stage: 3,
-    description: 'GSTIN checksum verification, rate checks & arithmetic audit',
-    icon: ShieldCheck,
+    description: 'Single-turn AST calculate_batch verifying line items & totals (max 50 calls)',
+    icon: Calculator,
+    execution_pattern: 'Single-Turn AST Batch',
   },
   {
-    step_id: 'ledger_resolution_xml_staging',
-    name: 'Ledger Resolution & XML Staging',
+    step_id: 'tally_validation_agent',
+    name: 'Tally & ERP Agent',
+    stage: 3,
+    description: 'Bounded ReAct 3-turn lookup (exact GSTIN -> PAN fallback -> duplicate check)',
+    icon: Database,
+    execution_pattern: 'Bounded ReAct (Max 3 Turns)',
+  },
+  {
+    step_id: 'reconciliation_revision_agent',
+    name: 'Maker-Checker Escalation',
+    stage: 3,
+    description: 'BFSI Strict Dual Control: Autonomous mutation disabled, discrepancies held for HITL',
+    icon: ShieldCheck,
+    execution_pattern: 'Strict Maker-Checker',
+  },
+  {
+    step_id: 'validation_synthesis_triage',
+    name: 'Compliance Triage & Staging',
     stage: 4,
-    description: 'In-memory Chart of Accounts mapping & XML staging (0 extra LLM calls)',
-    icon: Send,
+    description: 'Aggregating agent findings, confidence scoring & voucher staging',
+    icon: Layers,
+    execution_pattern: 'Immutable Audit Staging',
   },
 ];
 
@@ -361,6 +386,22 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
                     }}
                   >
                     {step.name}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginTop: '2px' }}>
+                    <span
+                      style={{
+                        fontSize: '9px',
+                        padding: '1px 5px',
+                        borderRadius: '4px',
+                        background: 'rgba(56, 189, 248, 0.12)',
+                        color: '#7dd3fc',
+                        border: '1px solid rgba(56, 189, 248, 0.25)',
+                        fontWeight: 600,
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {step.execution_pattern}
+                    </span>
                   </div>
                 </div>
               </div>

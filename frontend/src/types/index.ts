@@ -61,14 +61,41 @@ export interface MathValidationDetail {
   notes: string[];
 }
 
+export interface ReActTrajectoryStep {
+  turn: number;
+  step_name: string;
+  action: string;
+  input: Record<string, any>;
+  output: Record<string, any>;
+  reasoning: string;
+}
+
+export interface TallyValidationDetail {
+  is_valid: boolean;
+  party_ledger_found: boolean;
+  party_ledger_name?: string;
+  duplicate_invoice_found: boolean;
+  existing_voucher_number?: string;
+  stock_items_matched_count: number;
+  total_stock_items_count: number;
+  tally_connection_mode: string;
+  notes: string[];
+  react_trajectory?: ReActTrajectoryStep[];
+}
+
 export interface ValidationResult {
   is_fully_valid: boolean;
   supplier_gstin_check: GstinValidationDetail;
   buyer_gstin_check: GstinValidationDetail;
   math_check: MathValidationDetail;
+  tally_check?: TallyValidationDetail;
+  reconciliation_notes?: string[];
+  revision_count?: number;
   confidence_score: number;
   triage_status: 'auto_ready' | 'quick_review' | 'needs_attention';
   warnings: string[];
+  regulatory_audit_snapshot?: Record<string, any>;
+  bfsi_compliance_mode?: string;
 }
 
 export interface ExtractedInvoice {
@@ -221,6 +248,10 @@ export interface WorkflowStep {
   started_at?: string;
   completed_at?: string;
   duration_ms?: number;
+  tool_calls_count?: number;
+  tool_calls_limit?: number;
+  revision_count?: number;
+  max_revisions?: number;
   details?: Record<string, any>;
   error?: string;
 }
@@ -234,8 +265,12 @@ export interface WorkflowExecution {
   started_at?: string;
   completed_at?: string;
   total_duration_ms?: number;
+  revision_count?: number;
+  max_revisions?: number;
   steps: WorkflowStep[];
   confidence_score?: number;
+  regulatory_audit_snapshot?: Record<string, any>;
+  bfsi_compliance_mode?: string;
 }
 
 export interface WorkflowStepUpdate {

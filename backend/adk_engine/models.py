@@ -78,6 +78,31 @@ class MathValidationDetail(BaseModel):
     notes: List[str] = Field(default_factory=list)
 
 
+class ValidationTask(BaseModel):
+    rule_id: str = Field(..., description="Unique validation rule identifier e.g. math_line_item_multiplication")
+    name: str = Field(..., description="Human-readable rule name")
+    category: Literal["math", "tally", "compliance"] = Field(..., description="Rule category")
+    description: str = Field(..., description="Validation description")
+    status: Literal["pending", "passed", "failed", "skipped"] = "pending"
+    details: Dict[str, Any] = Field(default_factory=dict)
+
+
+class TallyValidationDetail(BaseModel):
+    is_valid: bool = True
+    party_ledger_found: bool = False
+    party_ledger_name: Optional[str] = None
+    duplicate_invoice_found: bool = False
+    existing_voucher_number: Optional[str] = None
+    stock_items_matched_count: int = 0
+    total_stock_items_count: int = 0
+    tally_connection_mode: Literal["live_mcp", "live_http", "virtual_simulator", "offline"] = "virtual_simulator"
+    notes: List[str] = Field(default_factory=list)
+    react_trajectory: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="Step-by-step Bounded ReAct turn trace (Turn 1: exact GSTIN -> Turn 2: PAN/name fallback -> Turn 3: duplicate check)",
+    )
+
+
 class GstinValidationDetail(BaseModel):
     gstin: Optional[str] = None
     is_valid_format: bool = False
@@ -97,6 +122,10 @@ class ValidationResult(BaseModel):
         default_factory=GstinValidationDetail
     )
     math_check: MathValidationDetail = Field(default_factory=MathValidationDetail)
+    tally_check: TallyValidationDetail = Field(default_factory=TallyValidationDetail)
+    validation_tasks: List[ValidationTask] = Field(default_factory=list)
+    reconciliation_notes: List[str] = Field(default_factory=list)
+    revision_count: int = Field(default=0, description="Number of automated reconciliation cycles executed")
     confidence_score: float = Field(
         default=0.0, description="Overall confidence 0.0 - 1.0"
     )
@@ -104,6 +133,14 @@ class ValidationResult(BaseModel):
         "auto_ready", "quick_review", "needs_attention"
     ] = "needs_attention"
     warnings: List[str] = Field(default_factory=list)
+    regulatory_audit_snapshot: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Cryptographic SHA-256 and deterministic AST validation proof for BFSI regulatory compliance",
+    )
+    bfsi_compliance_mode: str = Field(
+        default="STRICT_MAKER_CHECKER",
+        description="BFSI operating model enforcing non-repudiation and dual control",
+    )
 
 
 class ExtractedInvoice(BaseModel):
@@ -130,6 +167,7 @@ class ExtractedInvoice(BaseModel):
 
     raw_text: Optional[str] = None
     raw_markdown: Optional[str] = None
+    validation_plan: List[ValidationTask] = Field(default_factory=list)
     validation: Optional[ValidationResult] = None
     matched_tally_party_ledger: Optional[str] = None
     auto_create_party_ledger: bool = True
@@ -284,6 +322,9 @@ class ParsedDocument(BaseModel):
     tags: List[str] = Field(default_factory=list, description="Categorization tags")
     notes: Optional[str] = None
     structured_data: Optional[Dict[str, Any]] = None
+    validation_plan: List[ValidationTask] = Field(
+        default_factory=list, description="Dynamic list of validation tasks emitted by Gemini"
+    )
     workflow_execution: Optional[WorkflowExecution] = None
     validation: Optional[Dict[str, Any]] = None
     tally_xml: Optional[str] = None
@@ -300,6 +341,10 @@ class WorkflowStep(BaseModel):
     started_at: Optional[str] = None
     completed_at: Optional[str] = None
     duration_ms: Optional[float] = None
+    tool_calls_count: int = Field(default=0, description="Number of tool calls executed by this node")
+    tool_calls_limit: int = Field(default=50, description="Max tool call allowance for this node")
+    revision_count: int = Field(default=0, description="Current revision attempt number")
+    max_revisions: int = Field(default=2, description="Max allowable revision cycles")
     details: Dict[str, Any] = Field(default_factory=dict)
     error: Optional[str] = None
 
@@ -315,6 +360,16 @@ class WorkflowExecution(BaseModel):
     started_at: Optional[str] = None
     completed_at: Optional[str] = None
     total_duration_ms: Optional[float] = None
+    revision_count: int = Field(default=0, description="Number of automated reconciliation cycles executed")
+    max_revisions: int = Field(default=2, description="Max allowable reconciliation revision cycles")
     steps: List[WorkflowStep] = Field(default_factory=list)
     confidence_score: float = 0.0
+    regulatory_audit_snapshot: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Cryptographic SHA-256 and deterministic AST validation proof for BFSI compliance",
+    )
+    bfsi_compliance_mode: str = Field(
+        default="STRICT_MAKER_CHECKER",
+        description="BFSI operating model enforcing non-repudiation and dual control",
+    )
 

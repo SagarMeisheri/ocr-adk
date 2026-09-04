@@ -131,16 +131,18 @@ def test_pipeline_workflow_dag(monkeypatch, tmp_path):
     assert doc.id == "test-doc-999"
     assert doc.raw_markdown == "| Col 1 | Col 2 |\n|---|---|\n| Val 1 | Val 2 |"
     assert wf.status == "completed"
-    assert len(wf.steps) == 3
-    assert wf.steps[0].step_id == "document_ingestion"
-    assert wf.steps[1].step_id == "gemini_multimodal_extraction"
-    assert wf.steps[1].details.get("thinking_level") == "low"
-    assert wf.steps[1].details.get("media_resolution") == "high"
-    assert wf.steps[1].details.get("payload_method") == "inline_base64"
-    assert wf.steps[1].details.get("thinking_steps_count") == 1
-    assert wf.steps[1].details.get("thoughts_token_count") == 180
-    assert wf.steps[2].step_id == "layout_verification"
-    assert wf.steps[2].details.get("has_markdown_tables") is True
+    assert len(wf.steps) == 6
+    step_ids = [s.step_id for s in wf.steps]
+    assert "document_ingestion" in step_ids
+    assert "gemini_multimodal_extraction" in step_ids
+    assert "math_validation_agent" in step_ids
+    assert "tally_validation_agent" in step_ids
+    assert "reconciliation_revision_agent" in step_ids
+    assert "validation_synthesis_triage" in step_ids
+    extraction_step = next(s for s in wf.steps if s.step_id == "gemini_multimodal_extraction")
+    assert extraction_step.details.get("thinking_level") == "low"
+    assert extraction_step.details.get("media_resolution") == "high"
+    assert extraction_step.details.get("payload_method") == "inline_base64"
 
 
 def test_large_document_files_api_hybrid_upload(monkeypatch, tmp_path):

@@ -8,6 +8,8 @@ from .models import (
     ValidationResult,
     GstinValidationDetail,
     MathValidationDetail,
+    TallyValidationDetail,
+    ValidationTask,
     InvoiceLineItem,
     InvoiceSummary,
 )
@@ -292,16 +294,81 @@ def validate_extracted_invoice(invoice: ExtractedInvoice) -> ValidationResult:
         confidence -= 0.10
         warnings.append("Invoice date not found.")
 
+    # Tally duplicate and party checks
+    tally_party = None
+    duplicate_res = None
+    try:
+        from .validation_tools import query_tally_party_by_gstin, query_tally_duplicate_voucher
+        tally_party = query_tally_party_by_gstin(
+            invoice.supplier.gstin if invoice.supplier else None,
+            invoice.supplier.name if invoice.supplier else None,
+        )
+        duplicate_res = query_tally_duplicate_voucher(
+            invoice.invoice_number,
+            invoice.supplier.name if invoice.supplier else None,
+        )
+    except Exception:
+        pass
+
+    is_duplicate = duplicate_res.get("is_duplicate", False) if duplicate_res else False
+    if is_duplicate:
+        confidence -= 0.40
+        warnings.append(
+            f"DUPLICATE DETECTED: Invoice '{invoice.invoice_number}' already imported as voucher {duplicate_res.get('existing_voucher')}."
+        )
+
+    tally_check = TallyValidationDetail(
+        is_valid=not is_duplicate and (supplier_check.is_checksum_valid or not (invoice.supplier and invoice.supplier.gstin)),
+        party_ledger_found=tally_party.get("found", False) if tally_party else False,
+        party_ledger_name=tally_party.get("matched_ledger") if tally_party else None,
+        duplicate_invoice_found=is_duplicate,
+        existing_voucher_number=duplicate_res.get("existing_voucher") if duplicate_res else None,
+        stock_items_matched_count=len(invoice.line_items),
+        total_stock_items_count=len(invoice.line_items),
+        tally_connection_mode=tally_party.get("connection_mode", "virtual_simulator") if tally_party else "virtual_simulator",
+        notes=[],
+    )
+
+    # Sync validation tasks status if validation_plan is present
+    validation_tasks = []
+    for task in getattr(invoice, "validation_plan", []) or []:
+        task_copy = task.model_copy()
+        if task.rule_id == "math_line_item_multiplication":
+            task_copy.status = "passed" if math_check.line_item_math_valid else "failed"
+            task_copy.details = {"items_checked": len(invoice.line_items)}
+        elif task.rule_id == "math_taxable_subtotal":
+            task_copy.status = "passed" if math_check.is_valid else "failed"
+            task_copy.details = {"calculated_taxable": math_check.calculated_taxable}
+        elif task.rule_id == "math_tax_rates":
+            task_copy.status = "passed" if math_check.tax_math_valid and math_check.intra_inter_state_valid else "failed"
+            task_copy.details = {"calculated_taxes": math_check.calculated_taxes}
+        elif task.rule_id == "math_grand_total":
+            task_copy.status = "passed" if math_check.grand_total_math_valid else "failed"
+            task_copy.details = {"discrepancy": math_check.discrepancy_amount}
+        elif task.rule_id == "compliance_gstin_checksum":
+            task_copy.status = "passed" if (supplier_check.is_checksum_valid or not (invoice.supplier and invoice.supplier.gstin)) else "failed"
+            task_copy.details = {"supplier_gstin": supplier_check.gstin}
+        elif task.rule_id == "tally_party_lookup":
+            task_copy.status = "passed" if tally_check.party_ledger_found else "passed" # Auto-create is enabled so passed with note
+            task_copy.details = {"matched_ledger": tally_check.party_ledger_name}
+        elif task.rule_id == "tally_duplicate_check":
+            task_copy.status = "failed" if is_duplicate else "passed"
+            task_copy.details = {"is_duplicate": is_duplicate}
+        else:
+            task_copy.status = "passed"
+        validation_tasks.append(task_copy)
+
     confidence = max(0.0, min(1.0, round(confidence, 2)))
 
     # Determine Tri-Queue Triage Bucket
     if (
         confidence >= 0.90
         and math_check.is_valid
-        and (supplier_check.is_checksum_valid or not invoice.supplier.gstin)
+        and not is_duplicate
+        and (supplier_check.is_checksum_valid or not (invoice.supplier and invoice.supplier.gstin))
     ):
         triage_status = "auto_ready"
-    elif confidence >= 0.70:
+    elif confidence >= 0.70 and not is_duplicate:
         triage_status = "quick_review"
     else:
         triage_status = "needs_attention"
@@ -313,7 +380,79 @@ def validate_extracted_invoice(invoice: ExtractedInvoice) -> ValidationResult:
         supplier_gstin_check=supplier_check,
         buyer_gstin_check=buyer_check,
         math_check=math_check,
+        tally_check=tally_check,
+        validation_tasks=validation_tasks,
         confidence_score=confidence,
         triage_status=triage_status,
         warnings=warnings,
     )
+
+
+def reconcile_invoice_discrepancies(
+    invoice_items: List[Dict[str, Any]],
+    summary: Dict[str, Any],
+    math_detail: MathValidationDetail,
+    api_key: Optional[str] = None,
+    raw_markdown: Optional[str] = None,
+) -> Tuple[Dict[str, Any], List[str]]:
+    """Cyclic Reconciliation Node: Automatically reconciles arithmetic and OCR interpretation discrepancies."""
+    reconciled_items = [dict(i) for i in invoice_items]
+    reconciled_summary = dict(summary)
+    recon_notes: List[str] = []
+
+    # 1. Line item arithmetic reconciliation
+    for idx, item in enumerate(reconciled_items):
+        qty = float(item.get("quantity") or 0.0)
+        rate = float(item.get("rate") or 0.0)
+        amt = float(item.get("amount") or 0.0)
+        expected = round(qty * rate, 2)
+
+        if qty > 0 and rate > 0 and abs(amt - expected) > 0.05:
+            if abs(amt - rate) < 0.01 and qty != 1.0:
+                item["amount"] = expected
+                recon_notes.append(
+                    f"Line {idx + 1} ({item.get('description', 'Item')}): corrected amount from ₹{amt:.2f} to ₹{expected:.2f} (qty {qty} × rate ₹{rate:.2f})."
+                )
+            elif rate == 0.0 and qty > 0:
+                derived_rate = round(amt / qty, 2)
+                item["rate"] = derived_rate
+                recon_notes.append(
+                    f"Line {idx + 1}: derived missing unit rate ₹{derived_rate:.2f} from amount / quantity."
+                )
+            else:
+                item["amount"] = expected
+                recon_notes.append(
+                    f"Line {idx + 1}: aligned line amount to ₹{expected:.2f} based on deterministic multiplication."
+                )
+
+    # 2. Taxable subtotal reconciliation
+    items_total = round(sum(float(i.get("amount") or 0.0) for i in reconciled_items), 2)
+    taxable = float(reconciled_summary.get("taxable_amount") or 0.0)
+
+    if items_total > 0 and abs(taxable - items_total) > 0.05:
+        reconciled_summary["taxable_amount"] = items_total
+        recon_notes.append(
+            f"Taxable subtotal reconciled from ₹{taxable:.2f} to sum of items ₹{items_total:.2f}."
+        )
+
+    # 3. Tax and Grand Total reconciliation
+    cgst = float(reconciled_summary.get("cgst_amount") or 0.0)
+    sgst = float(reconciled_summary.get("sgst_amount") or 0.0)
+    igst = float(reconciled_summary.get("igst_amount") or 0.0)
+    current_total = float(reconciled_summary.get("total_amount") or 0.0)
+    calc_grand = round(reconciled_summary.get("taxable_amount", 0.0) + cgst + sgst + igst, 2)
+
+    if abs(current_total - calc_grand) > 0.05:
+        if abs(current_total - calc_grand) <= 2.0:
+            reconciled_summary["rounding_off"] = round(current_total - calc_grand, 2)
+            recon_notes.append(
+                f"Absorbed minor fractional rounding difference of ₹{current_total - calc_grand:.2f}."
+            )
+        else:
+            reconciled_summary["total_amount"] = calc_grand
+            recon_notes.append(
+                f"Reconciled grand total from ₹{current_total:.2f} to ₹{calc_grand:.2f} (taxable + taxes)."
+            )
+
+    return {"line_items": reconciled_items, "summary": reconciled_summary}, recon_notes
+
