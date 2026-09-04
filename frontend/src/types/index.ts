@@ -176,3 +176,76 @@ export interface HITLApprovalRecord {
   reviewed_by?: string;
   reviewed_at?: string;
 }
+
+// ==========================================
+// Universal Parsed Document Types
+// ==========================================
+
+export interface ParsedDocument {
+  id: string;
+  filename: string;
+  filepath: string;
+  content_type?: string;
+  doc_type: 'invoice' | 'bank_statement' | 'receipt' | 'bill' | 'financial_doc' | 'other';
+  title: string;
+  document_number?: string;
+  date?: string;
+  parties?: {
+    issuer?: Record<string, any>;
+    recipient?: Record<string, any>;
+    bank?: Record<string, any>;
+    [key: string]: any;
+  };
+  summary?: Record<string, any>;
+  items?: Array<Record<string, any>>;
+  raw_markdown?: string;
+  thinking_process?: string[];
+  thoughts_token_count?: number;
+  confidence_score: number;
+  status: string;
+  tally_xml?: string;
+  tags?: string[];
+  notes?: string;
+  created_at?: string;
+  file_url?: string;
+  workflow_execution?: WorkflowExecution;
+  validation?: any;
+}
+
+
+export interface WorkflowStep {
+  step_id: string;
+  name: string;
+  stage: number;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
+  started_at?: string;
+  completed_at?: string;
+  duration_ms?: number;
+  details?: Record<string, any>;
+  error?: string;
+}
+
+export interface WorkflowExecution {
+  workflow_name: string;
+  document_id: string;
+  filename?: string;
+  current_step_id?: string;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  started_at?: string;
+  completed_at?: string;
+  total_duration_ms?: number;
+  steps: WorkflowStep[];
+  confidence_score?: number;
+}
+
+export interface WorkflowStepUpdate {
+  type: 'WORKFLOW_STEP_UPDATE';
+  document_id: string;
+  filename: string;
+  step_id: string;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  details?: Record<string, any>;
+  timestamp?: string;
+}
+
+

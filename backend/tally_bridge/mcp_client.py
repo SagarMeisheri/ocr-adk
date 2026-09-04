@@ -53,7 +53,13 @@ def get_tally_mcp_toolset(
         node_bin = shutil.which("node") or "node"
 
         if not mcp_script_path:
-            bundled = Path(__file__).resolve().parent.parent.parent / "mcp_server" / "tally_mcp" / "dist" / "index.mjs"
+            bundled = (
+                Path(__file__).resolve().parent.parent.parent
+                / "mcp_server"
+                / "tally_mcp"
+                / "dist"
+                / "index.mjs"
+            )
             if bundled.exists():
                 mcp_script_path = str(bundled)
             else:
@@ -62,7 +68,11 @@ def get_tally_mcp_toolset(
         tool_filter = ALL_TALLY_MCP_TOOLS
         if block_write:
             # Strictly remove write tools from AI autonomous execution
-            tool_filter = [t for t in ALL_TALLY_MCP_TOOLS if t not in ("ledger-create-update", "delete-master")]
+            tool_filter = [
+                t
+                for t in ALL_TALLY_MCP_TOOLS
+                if t not in ("ledger-create-update", "delete-master")
+            ]
 
         toolset = McpToolset(
             connection_params=StdioConnectionParams(
@@ -74,7 +84,7 @@ def get_tally_mcp_toolset(
                         "TALLY_PORT": str(tally_port),
                         "BLOCK_WRITE": "1" if block_write else "0",
                         "PATH": os.environ.get("PATH", ""),
-                    }
+                    },
                 ),
                 timeout=15,
             ),

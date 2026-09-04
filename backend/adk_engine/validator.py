@@ -89,19 +89,19 @@ def validate_gstin(gstin: Optional[str]) -> GstinValidationDetail:
             gstin=None,
             is_valid_format=False,
             is_checksum_valid=False,
-            error_message="GSTIN is missing (common for unregistered kirana stores or cash memos)"
+            error_message="GSTIN is missing (common for unregistered kirana stores or cash memos)",
         )
 
-    clean_gstin = re.sub(r'[^A-Za-z0-9]', '', gstin).upper()
+    clean_gstin = re.sub(r"[^A-Za-z0-9]", "", gstin).upper()
 
     # Standard GSTIN regex: 2 digits + 5 letters + 4 digits + 1 letter + 1 char + Z + 1 char
-    regex = r'^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$'
+    regex = r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$"
     if not re.match(regex, clean_gstin):
         return GstinValidationDetail(
             gstin=clean_gstin,
             is_valid_format=False,
             is_checksum_valid=False,
-            error_message=f"Invalid GSTIN structure: '{clean_gstin}'. Must be 15 alphanumeric characters."
+            error_message=f"Invalid GSTIN structure: '{clean_gstin}'. Must be 15 alphanumeric characters.",
         )
 
     state_code = clean_gstin[:2]
@@ -111,9 +111,13 @@ def validate_gstin(gstin: Optional[str]) -> GstinValidationDetail:
     # Check Luhn mod-36 check digit
     expected_check = calculate_gstin_checksum(clean_gstin[:14])
     actual_check = clean_gstin[14]
-    is_checksum_valid = (expected_check == actual_check)
+    is_checksum_valid = expected_check == actual_check
 
-    err = None if is_checksum_valid else f"Checksum mismatch: expected '{expected_check}', got '{actual_check}'"
+    err = (
+        None
+        if is_checksum_valid
+        else f"Checksum mismatch: expected '{expected_check}', got '{actual_check}'"
+    )
 
     return GstinValidationDetail(
         gstin=clean_gstin,
@@ -122,7 +126,7 @@ def validate_gstin(gstin: Optional[str]) -> GstinValidationDetail:
         state_code=state_code,
         pan=pan,
         state_name=state_name,
-        error_message=err
+        error_message=err,
     )
 
 
@@ -130,7 +134,7 @@ def validate_tax_math(
     supplier: Optional[GstinValidationDetail],
     buyer: Optional[GstinValidationDetail],
     line_items: List[InvoiceLineItem],
-    summary: InvoiceSummary
+    summary: InvoiceSummary,
 ) -> MathValidationDetail:
     """Performs comprehensive GST mathematical verification."""
     notes: List[str] = []
@@ -143,9 +147,13 @@ def validate_tax_math(
     if supplier and supplier.state_code and buyer and buyer.state_code:
         if supplier.state_code != buyer.state_code:
             is_inter_state = True
-            notes.append(f"Inter-State Sale ({supplier.state_name} -> {buyer.state_name}): Expected IGST")
+            notes.append(
+                f"Inter-State Sale ({supplier.state_name} -> {buyer.state_name}): Expected IGST"
+            )
         else:
-            notes.append(f"Intra-State Sale (Within {supplier.state_name}): Expected CGST + SGST")
+            notes.append(
+                f"Intra-State Sale (Within {supplier.state_name}): Expected CGST + SGST"
+            )
 
     calc_taxable_sum = 0.0
     calc_cgst_sum = 0.0
@@ -173,7 +181,9 @@ def validate_tax_math(
             expected_igst = round(item.taxable_value * (item.gst_rate / 100.0), 2)
             if item.cgst_amount > 0 or item.sgst_amount > 0:
                 intra_inter_state_valid = False
-                notes.append(f"Line #{idx}: Inter-state transaction should not have CGST/SGST.")
+                notes.append(
+                    f"Line #{idx}: Inter-state transaction should not have CGST/SGST."
+                )
             calc_igst_sum += item.igst_amount
         else:
             half_rate = item.gst_rate / 2.0
@@ -183,14 +193,18 @@ def validate_tax_math(
             if item.igst_amount > 0 and abs(item.cgst_amount + item.sgst_amount) < 0.01:
                 # If supplier charged IGST within same state, flag warning
                 intra_inter_state_valid = False
-                notes.append(f"Line #{idx}: Intra-state invoice has IGST instead of CGST + SGST.")
+                notes.append(
+                    f"Line #{idx}: Intra-state invoice has IGST instead of CGST + SGST."
+                )
 
     # 3. Summary totals check
     calc_taxes = calc_cgst_sum + calc_sgst_sum + calc_igst_sum + summary.total_cess
     calc_grand_total = round(calc_taxable_sum + calc_taxes + summary.round_off, 2)
 
     discrepancy = abs(summary.grand_total - calc_grand_total)
-    grand_total_math_valid = discrepancy <= 1.00  # Allow up to 1 rupee for rounding variance
+    grand_total_math_valid = (
+        discrepancy <= 1.00
+    )  # Allow up to 1 rupee for rounding variance
 
     if not grand_total_math_valid:
         notes.append(
@@ -198,7 +212,9 @@ def validate_tax_math(
             f"Calculated ₹{calc_grand_total:.2f} (Diff: ₹{discrepancy:.2f})"
         )
 
-    is_overall_valid = line_item_math_valid and grand_total_math_valid and intra_inter_state_valid
+    is_overall_valid = (
+        line_item_math_valid and grand_total_math_valid and intra_inter_state_valid
+    )
 
     return MathValidationDetail(
         is_valid=is_overall_valid,
@@ -210,20 +226,22 @@ def validate_tax_math(
         calculated_taxes=round(calc_taxes, 2),
         calculated_grand_total=calc_grand_total,
         discrepancy_amount=round(discrepancy, 2),
-        notes=notes
+        notes=notes,
     )
 
 
 def validate_extracted_invoice(invoice: ExtractedInvoice) -> ValidationResult:
     """Runs end-to-end validation and produces triage bucket and confidence rating."""
-    supplier_check = validate_gstin(invoice.supplier.gstin if invoice.supplier else None)
+    supplier_check = validate_gstin(
+        invoice.supplier.gstin if invoice.supplier else None
+    )
     buyer_check = validate_gstin(invoice.buyer.gstin if invoice.buyer else None)
 
     math_check = validate_tax_math(
         supplier=supplier_check,
         buyer=buyer_check,
         line_items=invoice.line_items,
-        summary=invoice.summary
+        summary=invoice.summary,
     )
 
     warnings: List[str] = []
@@ -236,7 +254,9 @@ def validate_extracted_invoice(invoice: ExtractedInvoice) -> ValidationResult:
             warnings.append("Supplier GSTIN format is invalid.")
         elif not supplier_check.is_checksum_valid:
             confidence -= 0.10
-            warnings.append(f"Supplier GSTIN checksum failed: {supplier_check.error_message}")
+            warnings.append(
+                f"Supplier GSTIN checksum failed: {supplier_check.error_message}"
+            )
     else:
         # B2C or unregistered vendor
         confidence -= 0.10
@@ -245,11 +265,15 @@ def validate_extracted_invoice(invoice: ExtractedInvoice) -> ValidationResult:
     # Math checks
     if not math_check.line_item_math_valid:
         confidence -= 0.15
-        warnings.append("Line item math discrepancy detected (Quantity * Rate != Taxable).")
+        warnings.append(
+            "Line item math discrepancy detected (Quantity * Rate != Taxable)."
+        )
 
     if not math_check.grand_total_math_valid:
         confidence -= 0.25
-        warnings.append(f"Grand total math mismatch by ₹{math_check.discrepancy_amount:.2f}.")
+        warnings.append(
+            f"Grand total math mismatch by ₹{math_check.discrepancy_amount:.2f}."
+        )
 
     if not math_check.intra_inter_state_valid:
         confidence -= 0.10
@@ -271,14 +295,18 @@ def validate_extracted_invoice(invoice: ExtractedInvoice) -> ValidationResult:
     confidence = max(0.0, min(1.0, round(confidence, 2)))
 
     # Determine Tri-Queue Triage Bucket
-    if confidence >= 0.90 and math_check.is_valid and (supplier_check.is_checksum_valid or not invoice.supplier.gstin):
+    if (
+        confidence >= 0.90
+        and math_check.is_valid
+        and (supplier_check.is_checksum_valid or not invoice.supplier.gstin)
+    ):
         triage_status = "auto_ready"
     elif confidence >= 0.70:
         triage_status = "quick_review"
     else:
         triage_status = "needs_attention"
 
-    is_fully_valid = (triage_status == "auto_ready")
+    is_fully_valid = triage_status == "auto_ready"
 
     return ValidationResult(
         is_fully_valid=is_fully_valid,
@@ -287,5 +315,5 @@ def validate_extracted_invoice(invoice: ExtractedInvoice) -> ValidationResult:
         math_check=math_check,
         confidence_score=confidence,
         triage_status=triage_status,
-        warnings=warnings
+        warnings=warnings,
     )

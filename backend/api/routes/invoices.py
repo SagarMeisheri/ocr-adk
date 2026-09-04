@@ -13,7 +13,7 @@ from ...adk_engine.models import ExtractedInvoice
 from ...adk_engine.workflow import InvoiceProcessingPipeline
 from ...adk_engine.validator import validate_extracted_invoice
 from ...tally_bridge.xml_builder import generate_tally_purchase_voucher_xml
-from ..storage import InvoiceStore
+from ..storage import InvoiceStore, DocumentStore
 
 router = APIRouter(prefix="/api/invoices", tags=["Invoices"])
 
@@ -52,9 +52,16 @@ async def upload_invoices(
         with open(target_path, "wb") as buffer:
             shutil.copyfileobj(file_item.file, buffer)
 
+        print(
+            f"[ADK Pipeline] Starting processing for {file_item.filename} ({saved_filename})..."
+        )
+
         # Process invoice through Google ADK multi-stage pipeline
         try:
             invoice_obj, tally_xml = pipeline.process_invoice(str(target_path))
+            print(
+                f"[ADK Pipeline] Successfully extracted {invoice_obj.invoice_number} (Total: ₹{invoice_obj.summary.grand_total})"
+            )
 
             # Store in database
             InvoiceStore.save_invoice(
@@ -64,31 +71,75 @@ async def upload_invoices(
                 content_type=file_item.content_type or "application/pdf",
                 invoice_data=invoice_obj.model_dump(),
                 tally_xml=tally_xml,
-                status="extracted"
+                status="extracted",
             )
 
-            results.append({
-                "id": invoice_id,
-                "filename": file_item.filename or saved_filename,
-                "status": "extracted",
-                "invoice_number": invoice_obj.invoice_number,
-                "grand_total": invoice_obj.summary.grand_total,
-                "triage_status": invoice_obj.validation.triage_status if invoice_obj.validation else "needs_attention",
-                "confidence_score": invoice_obj.validation.confidence_score if invoice_obj.validation else 0.0,
-            })
+            # Mirror in DocumentStore
+            DocumentStore.save_document(
+                id=invoice_id,
+                filename=file_item.filename or saved_filename,
+                filepath=str(target_path),
+                content_type=file_item.content_type or "application/pdf",
+                doc_type="invoice",
+                title=f"Invoice from {invoice_obj.supplier.name}",
+                document_number=invoice_obj.invoice_number,
+                date=invoice_obj.invoice_date,
+                parties={
+                    "issuer": invoice_obj.supplier.model_dump(),
+                    "recipient": invoice_obj.buyer.model_dump()
+                    if invoice_obj.buyer
+                    else {},
+                },
+                summary=invoice_obj.summary.model_dump(),
+                items=[i.model_dump() for i in invoice_obj.line_items],
+                raw_markdown=invoice_obj.raw_markdown or "",
+                confidence_score=invoice_obj.validation.confidence_score
+                if invoice_obj.validation
+                else 0.95,
+                status="extracted",
+                tally_xml=tally_xml,
+                tags=["invoice", "gst"],
+            )
+
+            results.append(
+                {
+                    "id": invoice_id,
+                    "filename": file_item.filename or saved_filename,
+                    "status": "extracted",
+                    "invoice_number": invoice_obj.invoice_number,
+                    "grand_total": invoice_obj.summary.grand_total,
+                    "triage_status": invoice_obj.validation.triage_status
+                    if invoice_obj.validation
+                    else "needs_attention",
+                    "confidence_score": invoice_obj.validation.confidence_score
+                    if invoice_obj.validation
+                    else 0.0,
+                }
+            )
         except Exception as e:
-            results.append({
-                "id": invoice_id,
-                "filename": file_item.filename or saved_filename,
-                "status": "error",
-                "error": str(e)
-            })
+            import traceback
+
+            traceback.print_exc()
+            print(f"[ADK Pipeline Error] Failed to extract {file_item.filename}: {e}")
+            results.append(
+                {
+                    "id": invoice_id,
+                    "filename": file_item.filename or saved_filename,
+                    "status": "error",
+                    "error": str(e),
+                }
+            )
 
     return {"uploaded_count": len(results), "invoices": results, "results": results}
 
 
 @router.get("")
-def list_invoices(triage: Optional[str] = Query(None, description="Filter by triage queue: auto_ready, quick_review, needs_attention, synced")):
+def list_invoices(
+    triage: Optional[str] = Query(
+        None,
+        description="Filter by triage queue: auto_ready, quick_review, needs_attention, synced",
+    )
+):
     """Retrieves invoices organized by Tri-Queue triage status."""
     return {"invoices": InvoiceStore.list_invoices(triage_filter=triage)}
 
@@ -123,7 +174,7 @@ def update_invoice(invoice_id: str, updated_data: ExtractedInvoice):
         content_type=existing["content_type"],
         invoice_data=updated_data.model_dump(),
         tally_xml=new_xml,
-        status="verified"
+        status="verified",
     )
 
     return {
@@ -156,11 +207,13 @@ def download_tally_xml(invoice_id: str):
     """Downloads the TallyPrime F9 Purchase Voucher XML file directly."""
     inv = InvoiceStore.get_invoice(invoice_id)
     if not inv or not inv.get("tally_xml"):
-        raise HTTPException(status_code=404, detail="Tally XML not found for this invoice")
+        raise HTTPException(
+            status_code=404, detail="Tally XML not found for this invoice"
+        )
 
     filename = f"tally_voucher_{inv.get('invoice_number', invoice_id)}.xml"
     return Response(
         content=inv["tally_xml"],
         media_type="application/xml",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

@@ -1,35 +1,32 @@
 import React, { useState, useEffect } from 'react';
-import { InvoiceListItem, TallyStatus } from './types';
+import { ParsedDocument, TallyStatus } from './types';
 import { api } from './services/api';
 import { Header } from './components/Header';
 import { UploadZone } from './components/UploadZone';
-import { TriQueue } from './components/TriQueue';
-import { InvoiceDetail } from './components/InvoiceDetail';
-import { TallySyncModal } from './components/TallySyncModal';
+import { DocumentQueue } from './components/DocumentQueue';
+import { DocumentInspector } from './components/DocumentInspector';
 import { SettingsModal } from './components/SettingsModal';
-import { BankingStudio } from './components/BankingStudio';
 import { HitlQueue } from './components/HitlQueue';
 
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'invoices' | 'banking' | 'hitl'>('invoices');
-  const [invoices, setInvoices] = useState<InvoiceListItem[]>([]);
-  const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null);
-  const [triageTab, setTriageTab] = useState<'all' | 'auto_ready' | 'quick_review' | 'needs_attention' | 'synced'>('all');
+  const [documents, setDocuments] = useState<ParsedDocument[]>([]);
+  const [selectedDocument, setSelectedDocument] = useState<ParsedDocument | null>(null);
+  const [docFilter, setDocFilter] = useState<string>('all');
   const [tallyStatus, setTallyStatus] = useState<TallyStatus>({
     online: false,
     company_name: 'Checking...',
   });
   const [pendingHitlCount, setPendingHitlCount] = useState<number>(0);
-  const [xmlModalInvoice, setXmlModalInvoice] = useState<InvoiceListItem | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [showUploadZone, setShowUploadZone] = useState(true);
 
   const loadData = async () => {
     try {
-      const res = await api.listInvoices(triageTab);
-      setInvoices(res.invoices);
+      const res = await api.listDocuments(docFilter);
+      setDocuments(res.documents || []);
     } catch (e) {
-      console.error('Failed to load invoices:', e);
+      console.error('Failed to load documents:', e);
     }
   };
 
@@ -45,28 +42,18 @@ export const App: React.FC = () => {
   const loadHitlCount = async () => {
     try {
       const res = await api.listPendingApprovals();
-      setPendingHitlCount(res.pending_approvals.length);
+      setPendingHitlCount(res.pending_approvals ? res.pending_approvals.length : 0);
     } catch (e) {
       console.error('Failed to load pending approvals:', e);
     }
   };
 
+  // Load once on mount or when filter/tab changes. Zero background polling loop.
   useEffect(() => {
     loadData();
     loadTally();
     loadHitlCount();
-
-    // Periodic heartbeat poll for Tally status and pending approvals every 4s
-    const interval = setInterval(() => {
-      loadTally();
-      loadHitlCount();
-      if (activeTab === 'invoices') {
-        loadData();
-      }
-    }, 4000);
-
-    return () => clearInterval(interval);
-  }, [triageTab, activeTab]);
+  }, [docFilter, activeTab]);
 
   const handleBatchSync = async () => {
     try {
@@ -80,13 +67,7 @@ export const App: React.FC = () => {
     }
   };
 
-  const selectedInvoice = selectedInvoiceId
-    ? invoices.find((i) => i.id === selectedInvoiceId) || null
-    : null;
-
-  const autoReadyCount = invoices.filter(
-    (i) => i.triage_status === 'auto_ready' && i.sync_status !== 'synced'
-  ).length;
+  const invoiceCount = documents.filter((d) => d.doc_type === 'invoice').length;
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
@@ -96,29 +77,22 @@ export const App: React.FC = () => {
         activeTab={activeTab}
         onTabChange={(tab) => {
           setActiveTab(tab);
-          setSelectedInvoiceId(null);
+          setSelectedDocument(null);
         }}
         onRefreshTally={loadTally}
         onOpenSettings={() => setIsSettingsOpen(true)}
         onBatchSync={handleBatchSync}
-        readyCount={autoReadyCount}
+        readyCount={invoiceCount}
         pendingHitlCount={pendingHitlCount}
         onNewUpload={() => {
-          setSelectedInvoiceId(null);
+          setSelectedDocument(null);
           setShowUploadZone(true);
         }}
       />
 
       {/* Main View Area */}
       <main style={{ flex: 1, padding: '0 24px 24px 24px' }}>
-        {activeTab === 'banking' ? (
-          /* Multi-Page Bank Statement Reconciliation Studio */
-          <BankingStudio
-            onApprovalRequested={() => {
-              loadHitlCount();
-            }}
-          />
-        ) : activeTab === 'hitl' ? (
+        {activeTab === 'hitl' ? (
           /* Deterministic Human-in-the-Loop Write Safety Queue */
           <HitlQueue
             onStatusChange={() => {
@@ -126,19 +100,18 @@ export const App: React.FC = () => {
               loadData();
             }}
           />
-        ) : selectedInvoice ? (
-          /* Side-by-Side Review Studio */
-          <InvoiceDetail
-            invoice={selectedInvoice}
-            onBack={() => setSelectedInvoiceId(null)}
-            onUpdated={() => {
+        ) : selectedDocument ? (
+          /* Full Split-Screen Document Inspector */
+          <DocumentInspector
+            document={selectedDocument}
+            onBack={() => setSelectedDocument(null)}
+            onRefresh={() => {
               loadData();
-              loadHitlCount();
+              setSelectedDocument(null);
             }}
-            onViewXml={(inv) => setXmlModalInvoice(inv)}
           />
         ) : (
-          /* Dashboard with Upload Zone & Tri-Queue Triage */
+          /* Unified Document Studio: Upload Zone & Document Queue */
           <div>
             {showUploadZone && (
               <UploadZone
@@ -148,27 +121,16 @@ export const App: React.FC = () => {
               />
             )}
 
-            <TriQueue
-              invoices={invoices}
-              activeTab={triageTab}
-              onTabChange={(tab) => setTriageTab(tab)}
-              onSelectInvoice={(id) => setSelectedInvoiceId(id)}
+            <DocumentQueue
+              documents={documents}
+              activeFilter={docFilter}
+              onFilterChange={(filter) => setDocFilter(filter)}
+              onSelectDocument={(doc) => setSelectedDocument(doc)}
               onRefresh={loadData}
-              onViewXml={(inv) => setXmlModalInvoice(inv)}
             />
           </div>
         )}
       </main>
-
-      {/* XML Inspection Modal */}
-      <TallySyncModal
-        invoice={xmlModalInvoice}
-        onClose={() => setXmlModalInvoice(null)}
-        onSynced={() => {
-          loadData();
-          loadHitlCount();
-        }}
-      />
 
       {/* Settings / Instructions Modal */}
       <SettingsModal
@@ -178,16 +140,19 @@ export const App: React.FC = () => {
       />
 
       {/* Footer */}
-      <footer style={{
-        textAlign: 'center',
-        padding: '16px',
-        color: 'var(--text-muted)',
-        fontSize: '12px',
-        borderTop: '1px solid var(--border-subtle)',
-        marginTop: 'auto',
-      }}>
-        TrulyTally AI &copy; 2026 &bull; Google ADK 2.0 &bull; dhananjay1405/tally-mcp-server &bull; Deterministic Human-in-the-Loop Write Safety Gate
+      <footer
+        style={{
+          textAlign: 'center',
+          padding: '16px',
+          color: 'var(--text-muted)',
+          fontSize: '12px',
+          borderTop: '1px solid var(--border-subtle)',
+          marginTop: 'auto',
+        }}
+      >
+        TrulyTally AI &copy; 2026 &bull; Google ADK 2.0 &bull; Universal Multimodal Document Studio &bull; Gemini 3.8 Flash
       </footer>
     </div>
   );
 };
+export default App;

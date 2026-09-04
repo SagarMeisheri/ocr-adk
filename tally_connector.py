@@ -178,7 +178,7 @@ def main():
     parser.add_argument("--tally-host", default="127.0.0.1", help="Tally Prime IP address (default: 127.0.0.1)")
     parser.add_argument("--tally-port", type=int, default=9000, help="Tally Prime Port (default: 9000)")
     parser.add_argument("--api-key", default="default-secret-key", help="Connector Workspace API Key")
-    parser.add_argument("--poll-interval", type=float, default=2.0, help="Polling interval in seconds")
+    parser.add_argument("--poll-interval", type=float, default=15.0, help="Polling interval in seconds")
 
     args = parser.parse_args()
 

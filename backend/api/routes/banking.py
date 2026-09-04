@@ -63,7 +63,9 @@ async def upload_bank_statement(file: UploadFile = File(...)):
             "total_credits": statement.total_credits,
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to process bank statement: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to process bank statement: {str(e)}"
+        )
 
 
 @router.get("/statements")
@@ -100,18 +102,25 @@ def stage_transaction_for_sync(txn_id: str, statement_id: str = Body(..., embed=
         raise HTTPException(status_code=404, detail="Transaction not found")
 
     from ...adk_engine.models import BankTransaction
+
     txn = BankTransaction.model_validate(txn_dict)
     bank_ledger = st.get("tally_bank_ledger") or "Bank Account"
 
     # Generate appropriate voucher XML
     if txn.suggested_voucher_type == "Contra":
-        xml_payload = generate_tally_bank_contra_voucher_xml(txn, bank_ledger=bank_ledger)
+        xml_payload = generate_tally_bank_contra_voucher_xml(
+            txn, bank_ledger=bank_ledger
+        )
         action_type = "POST_BANK_CONTRA"
     elif txn.withdrawal_dr > 0:
-        xml_payload = generate_tally_bank_payment_voucher_xml(txn, bank_ledger=bank_ledger)
+        xml_payload = generate_tally_bank_payment_voucher_xml(
+            txn, bank_ledger=bank_ledger
+        )
         action_type = "POST_BANK_PAYMENT"
     else:
-        xml_payload = generate_tally_bank_receipt_voucher_xml(txn, bank_ledger=bank_ledger)
+        xml_payload = generate_tally_bank_receipt_voucher_xml(
+            txn, bank_ledger=bank_ledger
+        )
         action_type = "POST_BANK_RECEIPT"
 
     desc = f"{txn.suggested_voucher_type} Voucher: {txn.narration[:40]} (₹{txn.withdrawal_dr or txn.deposit_cr:.2f})"
@@ -141,6 +150,7 @@ def stage_all_transactions_for_sync(statement_id: str):
         raise HTTPException(status_code=404, detail="Statement not found")
 
     from ...adk_engine.models import BankTransaction
+
     staged_count = 0
     bank_ledger = st.get("tally_bank_ledger") or "Bank Account"
 
@@ -148,13 +158,19 @@ def stage_all_transactions_for_sync(statement_id: str):
         if t_dict.get("approval_status") != "synced":
             txn = BankTransaction.model_validate(t_dict)
             if txn.suggested_voucher_type == "Contra":
-                xml_payload = generate_tally_bank_contra_voucher_xml(txn, bank_ledger=bank_ledger)
+                xml_payload = generate_tally_bank_contra_voucher_xml(
+                    txn, bank_ledger=bank_ledger
+                )
                 action_type = "POST_BANK_CONTRA"
             elif txn.withdrawal_dr > 0:
-                xml_payload = generate_tally_bank_payment_voucher_xml(txn, bank_ledger=bank_ledger)
+                xml_payload = generate_tally_bank_payment_voucher_xml(
+                    txn, bank_ledger=bank_ledger
+                )
                 action_type = "POST_BANK_PAYMENT"
             else:
-                xml_payload = generate_tally_bank_receipt_voucher_xml(txn, bank_ledger=bank_ledger)
+                xml_payload = generate_tally_bank_receipt_voucher_xml(
+                    txn, bank_ledger=bank_ledger
+                )
                 action_type = "POST_BANK_RECEIPT"
 
             desc = f"{txn.suggested_voucher_type} Voucher: {txn.narration[:40]} (₹{txn.withdrawal_dr or txn.deposit_cr:.2f})"

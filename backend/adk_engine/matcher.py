@@ -52,7 +52,9 @@ class TallyMasterMatcher:
             "Purchase Exempt",
         ]
 
-    def find_best_match(self, query: str, candidates: List[str], cutoff: float = 0.65) -> Optional[Tuple[str, float]]:
+    def find_best_match(
+        self, query: str, candidates: List[str], cutoff: float = 0.65
+    ) -> Optional[Tuple[str, float]]:
         """Finds closest match from a list of strings using SequenceMatcher."""
         if not query or not candidates:
             return None
@@ -88,7 +90,9 @@ class TallyMasterMatcher:
 
     def match_stock_item(self, item_description: str) -> Tuple[Optional[str], bool]:
         """Returns (matched_stock_item_name, is_new_item)."""
-        match = self.find_best_match(item_description, self.existing_stock_items, cutoff=0.70)
+        match = self.find_best_match(
+            item_description, self.existing_stock_items, cutoff=0.70
+        )
         if match:
             return match[0], False
         return item_description.strip(), True
@@ -108,13 +112,20 @@ class TallyMasterMatcher:
 
         # 2. Determine if interstate
         is_interstate = False
-        if invoice.supplier and invoice.supplier.state_code and invoice.buyer and invoice.buyer.state_code:
-            is_interstate = (invoice.supplier.state_code != invoice.buyer.state_code)
+        if (
+            invoice.supplier
+            and invoice.supplier.state_code
+            and invoice.buyer
+            and invoice.buyer.state_code
+        ):
+            is_interstate = invoice.supplier.state_code != invoice.buyer.state_code
 
         # 3. Match Line Items
         for item in invoice.line_items:
             matched_item, is_new_item = self.match_stock_item(item.description)
             item.matched_tally_stock_item = matched_item
-            item.matched_tally_purchase_ledger = self.resolve_purchase_ledger(item.gst_rate, is_interstate)
+            item.matched_tally_purchase_ledger = self.resolve_purchase_ledger(
+                item.gst_rate, is_interstate
+            )
 
         return invoice

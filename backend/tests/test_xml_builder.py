@@ -17,7 +17,6 @@ from backend.adk_engine.models import (
 
 
 class TestXmlBuilder(unittest.TestCase):
-
     def test_format_tally_date(self):
         self.assertEqual(format_tally_date("2026-09-03"), "20260903")
         self.assertEqual(format_tally_date("2026/08/15"), "20260815")
@@ -28,7 +27,7 @@ class TestXmlBuilder(unittest.TestCase):
             name="Global Supplies Ltd",
             parent="Sundry Creditors",
             gstin="27AAPFU0939F1ZV",
-            state="Maharashtra"
+            state="Maharashtra",
         )
         self.assertIn('<LEDGER NAME="Global Supplies Ltd" ACTION="Create">', xml_str)
         self.assertIn("<PARENT>Sundry Creditors</PARENT>", xml_str)
@@ -40,9 +39,11 @@ class TestXmlBuilder(unittest.TestCase):
             name="Industrial Sensor Node",
             base_units="Nos",
             hsn_code="90318000",
-            gst_rate=18.0
+            gst_rate=18.0,
         )
-        self.assertIn('<STOCKITEM NAME="Industrial Sensor Node" ACTION="Create">', xml_str)
+        self.assertIn(
+            '<STOCKITEM NAME="Industrial Sensor Node" ACTION="Create">', xml_str
+        )
         self.assertIn("<BASEUNITS>Nos</BASEUNITS>", xml_str)
         self.assertIn("<HSNCODE>90318000</HSNCODE>", xml_str)
 
@@ -53,7 +54,7 @@ class TestXmlBuilder(unittest.TestCase):
             supplier=InvoiceParty(
                 name="Apex Components India",
                 gstin="27AAPFU0939F1ZV",
-                state="Maharashtra"
+                state="Maharashtra",
             ),
             line_items=[
                 InvoiceLineItem(
@@ -67,7 +68,7 @@ class TestXmlBuilder(unittest.TestCase):
                     sgst_amount=450.0,
                     total_amount=5900.0,
                     matched_tally_stock_item="Power Supply Unit",
-                    matched_tally_purchase_ledger="Purchase Local GST"
+                    matched_tally_purchase_ledger="Purchase Local GST",
                 )
             ],
             summary=InvoiceSummary(
@@ -76,19 +77,23 @@ class TestXmlBuilder(unittest.TestCase):
                 total_sgst=450.0,
                 total_igst=0.0,
                 round_off=0.0,
-                grand_total=5900.0
+                grand_total=5900.0,
             ),
-            matched_tally_party_ledger="Apex Components India"
+            matched_tally_party_ledger="Apex Components India",
         )
 
-        xml_str = generate_tally_purchase_voucher_xml(invoice, company_name="My Company Ltd")
+        xml_str = generate_tally_purchase_voucher_xml(
+            invoice, company_name="My Company Ltd"
+        )
 
         self.assertIn("<TALLYREQUEST>Import Data</TALLYREQUEST>", xml_str)
         self.assertIn("<SVCURRENTCOMPANY>My Company Ltd</SVCURRENTCOMPANY>", xml_str)
         self.assertIn('<VOUCHER VCHTYPE="Purchase" ACTION="Create"', xml_str)
         self.assertIn("<DATE>20260902</DATE>", xml_str)
         self.assertIn("<REFERENCE>INV/9001</REFERENCE>", xml_str)
-        self.assertIn("<PARTYLEDGERNAME>Apex Components India</PARTYLEDGERNAME>", xml_str)
+        self.assertIn(
+            "<PARTYLEDGERNAME>Apex Components India</PARTYLEDGERNAME>", xml_str
+        )
         self.assertIn("<STOCKITEMNAME>Power Supply Unit</STOCKITEMNAME>", xml_str)
         self.assertIn("<AMOUNT>-5000.00</AMOUNT>", xml_str)
         self.assertIn("<ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>", xml_str)

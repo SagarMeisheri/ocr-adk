@@ -1,6 +1,8 @@
-import React, { useState, useRef } from 'react';
-import { UploadCloud, FileText, Image as ImageIcon, Sparkles, CheckCircle2, AlertCircle } from 'lucide-react';
-import { uploadInvoices } from '../services/api';
+import React, { useState, useRef, useEffect } from 'react';
+import { UploadCloud, FileText, Landmark, Receipt, Sparkles, CheckCircle2, AlertCircle } from 'lucide-react';
+import { uploadUniversalDocuments } from '../services/api';
+import { WorkflowGraph } from './WorkflowGraph';
+import { WorkflowExecution } from '../types';
 
 interface UploadZoneProps {
   onUploadSuccess: () => void;
@@ -10,22 +12,75 @@ export const UploadZone: React.FC<UploadZoneProps> = ({ onUploadSuccess }) => {
   const [isDragging, setIsDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<string | null>(null);
+  const [currentStepId, setCurrentStepId] = useState<string>('document_ingestion');
+  const [liveExecution, setLiveExecution] = useState<WorkflowExecution | undefined>(undefined);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    // Connect to WebSocket for live pipeline step broadcasting
+    let ws: WebSocket | null = null;
+    try {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//${window.location.host}/ws/events`;
+      ws = new WebSocket(wsUrl);
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === 'WORKFLOW_STEP_UPDATE') {
+            setCurrentStepId(data.step_id);
+            setUploadStatus(`Stage: ${data.step_id.replace(/_/g, ' ')}...`);
+          }
+        } catch {
+          // Ignore parse errors
+        }
+      };
+    } catch {
+      // WebSocket optional fallback
+    }
+
+    return () => {
+      if (ws) ws.close();
+    };
+  }, []);
 
   const handleFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     setUploading(true);
-    setUploadStatus(`Processing ${files.length} invoice(s) with Gemini 3.8 Flash & Google ADK...`);
+    setCurrentStepId('document_ingestion');
+    setUploadStatus(`Ingesting and normalizing ${files.length} document(s)...`);
 
     try {
       const fileArray = Array.from(files);
-      await uploadInvoices(fileArray);
-      setUploadStatus(`Successfully extracted ${fileArray.length} invoice(s)!`);
+
+      // Transition to Gemini vision step while upload processes
+      setTimeout(() => {
+        setCurrentStepId('gemini_multimodal_extraction');
+        setUploadStatus('Gemini 3.8 Flash Multimodal OCR & Reasoning (Single-Pass)...');
+      }, 300);
+
+      const res = await uploadUniversalDocuments(fileArray);
+
+      // On response, transition through deterministic validation and staging
+      setCurrentStepId('deterministic_validation');
+      setUploadStatus('GSTIN & Mathematical Verification...');
+      await new Promise((r) => setTimeout(r, 250));
+
+      setCurrentStepId('ledger_resolution_xml_staging');
+      setUploadStatus('Ledger Resolution & XML Voucher Staging...');
+      await new Promise((r) => setTimeout(r, 250));
+
+      if (res.results && res.results[0]?.workflow_execution) {
+        setLiveExecution(res.results[0].workflow_execution);
+      }
+
+      setUploadStatus(`Extracted and processed ${fileArray.length} document(s) successfully!`);
       setTimeout(() => {
         setUploadStatus(null);
         setUploading(false);
+        setLiveExecution(undefined);
         onUploadSuccess();
-      }, 1200);
+      }, 800);
     } catch (err: any) {
       setUploadStatus(`Extraction error: ${err.message}`);
       setUploading(false);
@@ -40,35 +95,54 @@ export const UploadZone: React.FC<UploadZoneProps> = ({ onUploadSuccess }) => {
 
   const loadPresetSample = async (sampleType: string) => {
     setUploading(true);
-    setUploadStatus(`Generating sample ${sampleType} invoice for Gemini extraction...`);
+    setCurrentStepId('document_ingestion');
+    setUploadStatus(`Loading demo ${sampleType} document...`);
 
-    // Create a mock File object with the sample keyword in filename
     let filename = 'digital_gst_invoice.pdf';
+    if (sampleType === 'bank_statement') filename = 'hdfc_bank_statement_aug2026.pdf';
     if (sampleType === 'handwritten') filename = 'kirana_handwritten_bill.jpg';
-    if (sampleType === 'interstate') filename = 'hardware_interstate_igst.pdf';
+    if (sampleType === 'receipt') filename = 'retail_store_receipt.pdf';
 
-    const mockContent = `Sample ${sampleType} invoice content for Google ADK OCR pipeline`;
+    const mockContent = `Sample ${sampleType} document for TrulyTally AI Document Engine`;
     const blob = new Blob([mockContent], { type: 'application/pdf' });
     const sampleFile = new File([blob], filename, { type: 'application/pdf' });
 
     try {
-      await uploadInvoices([sampleFile]);
+      setTimeout(() => {
+        setCurrentStepId('gemini_multimodal_extraction');
+        setUploadStatus('Gemini 3.8 Flash Vision (Single-Pass Extraction)...');
+      }, 300);
+
+      const res = await uploadUniversalDocuments([sampleFile]);
+
+      setCurrentStepId('deterministic_validation');
+      await new Promise((r) => setTimeout(r, 200));
+
+      setCurrentStepId('ledger_resolution_xml_staging');
+      await new Promise((r) => setTimeout(r, 200));
+
+      if (res.results && res.results[0]?.workflow_execution) {
+        setLiveExecution(res.results[0].workflow_execution);
+      }
+
       setUploadStatus(`Extracted ${filename} successfully!`);
       setTimeout(() => {
         setUploadStatus(null);
         setUploading(false);
+        setLiveExecution(undefined);
         onUploadSuccess();
-      }, 1000);
+      }, 800);
     } catch (err: any) {
       setUploadStatus(`Failed: ${err.message}`);
       setUploading(false);
     }
   };
 
+
   return (
     <div className="glass-panel" style={{ margin: '0 24px 20px 24px', padding: '24px' }}>
       <div
-        id="invoice-dropzone"
+        id="universal-document-dropzone"
         onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
         onDragLeave={() => setIsDragging(false)}
         onDrop={handleDrop}
@@ -106,60 +180,74 @@ export const UploadZone: React.FC<UploadZoneProps> = ({ onUploadSuccess }) => {
           <UploadCloud size={28} />
         </div>
 
-        <h3 style={{ fontSize: '16px', fontWeight: 600, color: '#fff', marginBottom: '6px' }}>
-          Drag & Drop Purchase Bills, Invoices, or WhatsApp Photos
+        <h3 style={{ fontSize: '17px', fontWeight: 600, color: '#fff', marginBottom: '6px' }}>
+          Drop Any Financial Document Here (Invoices, Bank Statements, Receipts, Bills)
         </h3>
-        <p style={{ fontSize: '13px', color: 'var(--text-secondary)', maxWidth: '480px', margin: '0 auto 16px auto' }}>
-          Supports single & multi-page Digital PDFs, Scanned Receipts, Mobile Camera shots, and Handwritten Kirana Bills
+        <p style={{ fontSize: '13px', color: 'var(--text-secondary)', margin: '0 0 16px 0' }}>
+          Supports multi-page PDFs, high-res scans, mobile photos, and handwritten bills &bull; Auto-classified by Gemini
         </p>
 
-        {uploadStatus && (
-          <div style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '8px',
-            padding: '6px 16px',
-            borderRadius: '9999px',
-            background: 'rgba(59, 130, 246, 0.15)',
-            color: '#60a5fa',
-            fontSize: '13px',
-            fontWeight: 500,
-          }}>
-            {uploading ? <Sparkles size={14} className="animate-spin" /> : <CheckCircle2 size={14} color="#34d399" />}
-            {uploadStatus}
+        {uploading ? (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px', width: '100%' }}>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '10px', color: '#38bdf8', fontSize: '14px', fontWeight: 600 }}>
+              <span className="spinner" />
+              <span>{uploadStatus}</span>
+            </div>
+            <div style={{ width: '100%', maxWidth: '960px', textAlign: 'left' }}>
+              <WorkflowGraph
+                execution={liveExecution}
+                currentStepId={currentStepId}
+                isLive={true}
+                compact={false}
+              />
+            </div>
           </div>
+        ) : (
+          <span className="btn btn-primary" style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+            <FileText size={16} /> Browse Documents
+          </span>
         )}
       </div>
 
-      {/* Quick Sample Presets */}
       <div style={{ marginTop: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
-        <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-          ⚡ <strong>Quick Test Presets</strong> (Click to simulate instant ingestion):
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: 'var(--text-secondary)' }}>
+          <Sparkles size={14} color="#38bdf8" /> Try instant demo documents:
         </div>
-        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
           <button
-            id="preset-digital-btn"
-            onClick={(e) => { e.stopPropagation(); loadPresetSample('digital'); }}
             className="btn btn-secondary"
-            style={{ fontSize: '12px', padding: '5px 12px' }}
+            style={{ fontSize: '12px', padding: '5px 12px', display: 'flex', alignItems: 'center', gap: '6px' }}
+            onClick={(e) => { e.stopPropagation(); loadPresetSample('gst_invoice'); }}
           >
-            <FileText size={13} color="#38bdf8" /> Digital PDF (Intra-State GST)
+            <FileText size={13} color="#38bdf8" /> Tax Invoice (GST)
           </button>
           <button
-            id="preset-handwritten-btn"
+            className="btn btn-secondary"
+            style={{ fontSize: '12px', padding: '5px 12px', display: 'flex', alignItems: 'center', gap: '6px' }}
+            onClick={(e) => { e.stopPropagation(); loadPresetSample('bank_statement'); }}
+          >
+            <Landmark size={13} color="#10b981" /> Bank Statement
+          </button>
+          <button
+            className="btn btn-secondary"
+            style={{ fontSize: '12px', padding: '5px 12px', display: 'flex', alignItems: 'center', gap: '6px' }}
+            onClick={(e) => { e.stopPropagation(); loadPresetSample('receipt'); }}
+          >
+            <Receipt size={13} color="#f59e0b" /> Store Receipt
+          </button>
+          <button
+            className="btn btn-secondary"
+            style={{ fontSize: '12px', padding: '5px 12px', display: 'flex', alignItems: 'center', gap: '6px' }}
             onClick={(e) => { e.stopPropagation(); loadPresetSample('handwritten'); }}
-            className="btn btn-secondary"
-            style={{ fontSize: '12px', padding: '5px 12px' }}
           >
-            <ImageIcon size={13} color="#fbbf24" /> Handwritten Kirana Cash Memo
+            <Sparkles size={13} color="#ec4899" /> Handwritten Bill
           </button>
           <button
-            id="preset-interstate-btn"
-            onClick={(e) => { e.stopPropagation(); loadPresetSample('interstate'); }}
             className="btn btn-secondary"
-            style={{ fontSize: '12px', padding: '5px 12px' }}
+            style={{ fontSize: '12px', padding: '5px 12px', display: 'flex', alignItems: 'center', gap: '6px' }}
+            onClick={(e) => { e.stopPropagation(); loadPresetSample('interstate'); }}
           >
-            <Sparkles size={13} color="#a855f7" /> Inter-State Hardware Bill (IGST)
+            <Sparkles size={13} color="#a855f7" /> Inter-State (IGST)
           </button>
         </div>
       </div>

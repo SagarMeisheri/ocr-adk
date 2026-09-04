@@ -29,11 +29,23 @@ class VirtualTallyState:
             {"name": "Input SGST 2.5%", "parent": "Duties & Taxes"},
             {"name": "Input IGST 5%", "parent": "Duties & Taxes"},
             {"name": "Round Off", "parent": "Indirect Expenses"},
-            {"name": "Syscom Cloud Infrastructure Ltd", "parent": "Sundry Creditors", "gstin": "27AAACS8912K1Z9"},
+            {
+                "name": "Syscom Cloud Infrastructure Ltd",
+                "parent": "Sundry Creditors",
+                "gstin": "27AAACS8912K1Z9",
+            },
         ]
         self.stock_items: List[Dict[str, Any]] = [
-            {"name": "Dedicated Cloud Server Hosting", "units": "Month", "hsn": "998315"},
-            {"name": "Edge AI Compute Accelerator Module", "units": "Nos", "hsn": "84715000"},
+            {
+                "name": "Dedicated Cloud Server Hosting",
+                "units": "Month",
+                "hsn": "998315",
+            },
+            {
+                "name": "Edge AI Compute Accelerator Module",
+                "units": "Nos",
+                "hsn": "84715000",
+            },
             {"name": "Managed SSL Certificate", "units": "Nos", "hsn": "998319"},
         ]
         self.vouchers: List[Dict[str, Any]] = []
@@ -42,13 +54,15 @@ class VirtualTallyState:
     def add_voucher(self, ref: str, party: str, amount: float, xml_body: str) -> str:
         self.voucher_counter += 1
         vch_num = f"VCH-2026-{self.voucher_counter:04d}"
-        self.vouchers.append({
-            "voucher_number": vch_num,
-            "reference": ref,
-            "party": party,
-            "amount": amount,
-            "raw_xml": xml_body,
-        })
+        self.vouchers.append(
+            {
+                "voucher_number": vch_num,
+                "reference": ref,
+                "party": party,
+                "amount": amount,
+                "raw_xml": xml_body,
+            }
+        )
         return vch_num
 
 
@@ -80,7 +94,7 @@ class VirtualTallyRequestHandler(BaseHTTPRequestHandler):
                 "ledger_count": len(GLOBAL_TALLY_STATE.ledgers),
                 "stock_item_count": len(GLOBAL_TALLY_STATE.stock_items),
                 "imported_vouchers_count": len(GLOBAL_TALLY_STATE.vouchers),
-                "vouchers": GLOBAL_TALLY_STATE.vouchers[-5:]  # last 5 vouchers
+                "vouchers": GLOBAL_TALLY_STATE.vouchers[-5:],  # last 5 vouchers
             }
             self.wfile.write(json.dumps(status_payload).encode("utf-8"))
         else:
@@ -144,9 +158,11 @@ class VirtualTallyRequestHandler(BaseHTTPRequestHandler):
 
         # 4. Master Creation: Ledger
         if "<LEDGER" in post_data and 'ACTION="Create"' in post_data:
-            name_match = re.search(r'<NAME>(.*?)</NAME>', post_data)
+            name_match = re.search(r"<NAME>(.*?)</NAME>", post_data)
             ledger_name = name_match.group(1) if name_match else "New Ledger"
-            GLOBAL_TALLY_STATE.ledgers.append({"name": ledger_name, "parent": "Sundry Creditors"})
+            GLOBAL_TALLY_STATE.ledgers.append(
+                {"name": ledger_name, "parent": "Sundry Creditors"}
+            )
             response_xml = """<RESPONSE>
   <CREATED>1</CREATED>
   <ALTERED>0</ALTERED>
@@ -158,7 +174,7 @@ class VirtualTallyRequestHandler(BaseHTTPRequestHandler):
 
         # 5. Master Creation: Stock Item
         if "<STOCKITEM" in post_data and 'ACTION="Create"' in post_data:
-            name_match = re.search(r'<NAME>(.*?)</NAME>', post_data)
+            name_match = re.search(r"<NAME>(.*?)</NAME>", post_data)
             item_name = name_match.group(1) if name_match else "New Item"
             GLOBAL_TALLY_STATE.stock_items.append({"name": item_name, "units": "Nos"})
             response_xml = """<RESPONSE>
@@ -171,11 +187,13 @@ class VirtualTallyRequestHandler(BaseHTTPRequestHandler):
             return
 
         # 6. Voucher Import: Purchase Voucher (F9)
-        if "VCHTYPE=\"Purchase\"" in post_data or "<VOUCHER" in post_data:
-            ref_match = re.search(r'<REFERENCE>(.*?)</REFERENCE>', post_data)
+        if 'VCHTYPE="Purchase"' in post_data or "<VOUCHER" in post_data:
+            ref_match = re.search(r"<REFERENCE>(.*?)</REFERENCE>", post_data)
             ref_str = ref_match.group(1) if ref_match else "UNKNOWN_REF"
 
-            party_match = re.search(r'<PARTYLEDGERNAME>(.*?)</PARTYLEDGERNAME>', post_data)
+            party_match = re.search(
+                r"<PARTYLEDGERNAME>(.*?)</PARTYLEDGERNAME>", post_data
+            )
             party_str = party_match.group(1) if party_match else "Vendor"
 
             vch_num = GLOBAL_TALLY_STATE.add_voucher(ref_str, party_str, 0.0, post_data)
@@ -207,7 +225,9 @@ def run_virtual_tally(port: int = 9000, host: str = "127.0.0.1") -> HTTPServer:
     return server
 
 
-def start_virtual_tally_background(port: int = 9000, host: str = "127.0.0.1") -> threading.Thread:
+def start_virtual_tally_background(
+    port: int = 9000, host: str = "127.0.0.1"
+) -> threading.Thread:
     """Runs virtual Tally in a daemon thread."""
     server = run_virtual_tally(port, host)
     thread = threading.Thread(target=server.serve_forever, daemon=True)

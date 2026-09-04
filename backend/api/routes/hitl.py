@@ -61,7 +61,9 @@ def stage_external_write(payload: ExternalWritePayload):
 @router.post("/{approval_id}/approve")
 def approve_write_action(approval_id: str, payload: ApprovePayload = ApprovePayload()):
     """Human operator signs off on a staged write action, releasing it to Tally."""
-    record = HitlStore.approve_action(approval_id, user=payload.reviewer or "Accountant")
+    record = HitlStore.approve_action(
+        approval_id, user=payload.reviewer or "Accountant"
+    )
     if not record:
         raise HTTPException(status_code=404, detail="Approval record not found")
 
@@ -76,7 +78,11 @@ def approve_write_action(approval_id: str, payload: ApprovePayload = ApprovePayl
 @router.post("/{approval_id}/reject")
 def reject_write_action(approval_id: str, payload: RejectPayload = RejectPayload()):
     """Human operator rejects the proposed write action."""
-    HitlStore.reject_action(approval_id, user=payload.reviewer or "Accountant", reason=payload.reason or "Rejected")
+    HitlStore.reject_action(
+        approval_id,
+        user=payload.reviewer or "Accountant",
+        reason=payload.reason or "Rejected",
+    )
     return {
         "status": "rejected",
         "approval_id": approval_id,

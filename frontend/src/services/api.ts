@@ -1,8 +1,44 @@
-import { InvoiceListItem, ExtractedInvoice, TallyStatus, BankStatement, HITLApprovalRecord } from '../types';
+import { InvoiceListItem, ExtractedInvoice, TallyStatus, BankStatement, HITLApprovalRecord, ParsedDocument } from '../types';
 
 const API_BASE = '/api';
 
 export const api = {
+  // Universal Documents
+  async listDocuments(typeFilter?: string): Promise<{ documents: ParsedDocument[]; total: number }> {
+    const url = typeFilter && typeFilter !== 'all' ? `${API_BASE}/documents?type=${typeFilter}` : `${API_BASE}/documents`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('Failed to fetch documents');
+    return res.json();
+  },
+
+  async uploadDocuments(files: File[]): Promise<any> {
+    const formData = new FormData();
+    for (const file of files) {
+      formData.append('files', file);
+    }
+    const res = await fetch(`${API_BASE}/documents/upload`, {
+      method: 'POST',
+      body: formData,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Document upload failed' }));
+      throw new Error(err.detail || 'Document upload failed');
+    }
+    return res.json();
+  },
+
+  async getDocument(id: string): Promise<ParsedDocument> {
+    const res = await fetch(`${API_BASE}/documents/${id}`);
+    if (!res.ok) throw new Error('Failed to fetch document');
+    return res.json();
+  },
+
+  async deleteDocument(id: string): Promise<any> {
+    const res = await fetch(`${API_BASE}/documents/${id}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error('Failed to delete document');
+    return res.json();
+  },
+
   // Invoices
   async listInvoices(filter?: string): Promise<{ invoices: InvoiceListItem[] }> {
     const url = filter ? `${API_BASE}/invoices?filter=${filter}` : `${API_BASE}/invoices`;
@@ -212,3 +248,17 @@ export const deleteInvoice = async (id: string): Promise<any> => {
 export const batchSyncReadyInvoices = async (): Promise<any> => {
   return api.batchSync();
 };
+
+export const fetchDocuments = async (typeFilter?: string): Promise<ParsedDocument[]> => {
+  const res = await api.listDocuments(typeFilter);
+  return res.documents;
+};
+
+export const uploadUniversalDocuments = async (files: File[]): Promise<any> => {
+  return api.uploadDocuments(files);
+};
+
+export const deleteUniversalDocument = async (id: string): Promise<any> => {
+  return api.deleteDocument(id);
+};
+

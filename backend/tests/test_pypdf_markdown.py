@@ -11,7 +11,6 @@ from backend.adk_engine.pypdf_preprocessor import PyPdfPreprocessor
 
 
 class TestPyPdfMarkdownParser(unittest.TestCase):
-
     def test_clean_number(self):
         self.assertEqual(clean_number("₹ 1,500.50"), 1500.50)
         self.assertEqual(clean_number("Rs. 25,000.00"), 25000.00)

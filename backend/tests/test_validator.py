@@ -16,7 +16,6 @@ from backend.adk_engine.models import (
 
 
 class TestValidator(unittest.TestCase):
-
     def test_gstin_checksum_valid(self):
         # 27AAPFU0939F1ZV is a real valid Maharashtra GSTIN
         check_char = calculate_gstin_checksum("27AAPFU0939F1Z")
@@ -54,13 +53,13 @@ class TestValidator(unittest.TestCase):
                 name="Alpha Corp",
                 gstin="27AAPFU0939F1ZV",
                 state="Maharashtra",
-                state_code="27"
+                state_code="27",
             ),
             buyer=InvoiceParty(
                 name="Apex Tech",
                 gstin="27AAACA1234A1ZK",
                 state="Maharashtra",
-                state_code="27"
+                state_code="27",
             ),
             line_items=[
                 InvoiceLineItem(
@@ -75,7 +74,7 @@ class TestValidator(unittest.TestCase):
                     cgst_amount=900.0,
                     sgst_amount=900.0,
                     igst_amount=0.0,
-                    total_amount=11800.0
+                    total_amount=11800.0,
                 )
             ],
             summary=InvoiceSummary(
@@ -84,8 +83,8 @@ class TestValidator(unittest.TestCase):
                 total_sgst=900.0,
                 total_igst=0.0,
                 round_off=0.0,
-                grand_total=11800.0
-            )
+                grand_total=11800.0,
+            ),
         )
 
         result = validate_extracted_invoice(invoice)
@@ -103,13 +102,13 @@ class TestValidator(unittest.TestCase):
                 name="Bangalore Circuits",
                 gstin="29ABCDE1234F1ZW",
                 state="Karnataka",
-                state_code="29"
+                state_code="29",
             ),
             buyer=InvoiceParty(
                 name="Apex Tech",
                 gstin="27AAACA1234A1ZK",
                 state="Maharashtra",
-                state_code="27"
+                state_code="27",
             ),
             line_items=[
                 InvoiceLineItem(
@@ -124,7 +123,7 @@ class TestValidator(unittest.TestCase):
                     cgst_amount=0.0,
                     sgst_amount=0.0,
                     igst_amount=1800.0,
-                    total_amount=11800.0
+                    total_amount=11800.0,
                 )
             ],
             summary=InvoiceSummary(
@@ -133,8 +132,8 @@ class TestValidator(unittest.TestCase):
                 total_sgst=0.0,
                 total_igst=1800.0,
                 round_off=0.0,
-                grand_total=11800.0
-            )
+                grand_total=11800.0,
+            ),
         )
 
         result = validate_extracted_invoice(invoice)
@@ -156,15 +155,15 @@ class TestValidator(unittest.TestCase):
                     gst_rate=18.0,
                     cgst_amount=9.0,
                     sgst_amount=9.0,
-                    total_amount=118.0
+                    total_amount=118.0,
                 )
             ],
             summary=InvoiceSummary(
                 total_taxable_value=100.0,
                 total_cgst=9.0,
                 total_sgst=9.0,
-                grand_total=500.0  # Big mismatch
-            )
+                grand_total=500.0,  # Big mismatch
+            ),
         )
 
         result = validate_extracted_invoice(invoice)

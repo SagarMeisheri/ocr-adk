@@ -12,16 +12,16 @@ def clean_number(val: Optional[str]) -> float:
         return 0.0
     s = str(val).strip()
     # Remove currency symbols and formatting
-    s = re.sub(r'[₹$€,]', '', s)
-    s = re.sub(r'(?i)rs\.?', '', s).strip()
+    s = re.sub(r"[₹$€,]", "", s)
+    s = re.sub(r"(?i)rs\.?", "", s).strip()
 
     # Handle negative in parenthesis: (100.00) -> -100.00
-    if s.startswith('(') and s.endswith(')'):
-        s = '-' + s[1:-1]
+    if s.startswith("(") and s.endswith(")"):
+        s = "-" + s[1:-1]
 
     # Handle trailing Dr/Cr
-    is_dr = bool(re.search(r'(?i)\s*dr$', s))
-    s = re.sub(r'(?i)\s*(cr|dr)$', '', s).strip()
+    is_dr = bool(re.search(r"(?i)\s*dr$", s))
+    s = re.sub(r"(?i)\s*(cr|dr)$", "", s).strip()
 
     try:
         n = float(s)
@@ -38,11 +38,11 @@ def parse_markdown_tables(markdown_text: str) -> List[List[List[str]]]:
 
     for line in markdown_text.splitlines():
         trimmed = line.strip()
-        if trimmed.startswith('|') and trimmed.endswith('|'):
+        if trimmed.startswith("|") and trimmed.endswith("|"):
             # Check if this is a separator line like |---|---|
-            if re.match(r'^\|[\s\-:|]+\|$', trimmed):
+            if re.match(r"^\|[\s\-:|]+\|$", trimmed):
                 continue
-            cells = [c.strip() for c in trimmed[1:-1].split('|')]
+            cells = [c.strip() for c in trimmed[1:-1].split("|")]
             current_table.append(cells)
             in_table = True
         else:
@@ -68,8 +68,14 @@ def parse_invoice_line_items_from_markdown(markdown_text: str) -> List[InvoiceLi
         headers = [h.lower() for h in table[0]]
 
         # Check if table looks like invoice line items
-        has_desc = any(h in headers for h in ["description", "item", "particulars", "product", "item name"])
-        has_val = any(h in headers for h in ["taxable", "rate", "amount", "total", "qty", "quantity"])
+        has_desc = any(
+            h in headers
+            for h in ["description", "item", "particulars", "product", "item name"]
+        )
+        has_val = any(
+            h in headers
+            for h in ["taxable", "rate", "amount", "total", "qty", "quantity"]
+        )
 
         if not (has_desc and has_val):
             continue
@@ -77,7 +83,9 @@ def parse_invoice_line_items_from_markdown(markdown_text: str) -> List[InvoiceLi
         # Map column indices
         col_map: Dict[str, int] = {}
         for idx, h in enumerate(headers):
-            if any(k in h for k in ["description", "item name", "product", "particulars"]):
+            if any(
+                k in h for k in ["description", "item name", "product", "particulars"]
+            ):
                 col_map.setdefault("description", idx)
             elif any(k in h for k in ["hsn", "sac"]):
                 col_map.setdefault("hsn", idx)
@@ -114,30 +122,46 @@ def parse_invoice_line_items_from_markdown(markdown_text: str) -> List[InvoiceLi
             qty = clean_number(row[col_map["qty"]]) if "qty" in col_map else 1.0
             unit = row[col_map["unit"]].strip() if "unit" in col_map else "Nos"
             rate = clean_number(row[col_map["rate"]]) if "rate" in col_map else 0.0
-            disc = clean_number(row[col_map["discount"]]) if "discount" in col_map else 0.0
-            taxable = clean_number(row[col_map["taxable"]]) if "taxable" in col_map else round((qty * rate) - disc, 2)
-            gst_rate = clean_number(row[col_map["gst_rate"]]) if "gst_rate" in col_map else 18.0
+            disc = (
+                clean_number(row[col_map["discount"]]) if "discount" in col_map else 0.0
+            )
+            taxable = (
+                clean_number(row[col_map["taxable"]])
+                if "taxable" in col_map
+                else round((qty * rate) - disc, 2)
+            )
+            gst_rate = (
+                clean_number(row[col_map["gst_rate"]])
+                if "gst_rate" in col_map
+                else 18.0
+            )
 
             cgst = clean_number(row[col_map["cgst"]]) if "cgst" in col_map else 0.0
             sgst = clean_number(row[col_map["sgst"]]) if "sgst" in col_map else 0.0
             igst = clean_number(row[col_map["igst"]]) if "igst" in col_map else 0.0
 
-            total = clean_number(row[col_map["total"]]) if "total" in col_map else round(taxable + cgst + sgst + igst, 2)
+            total = (
+                clean_number(row[col_map["total"]])
+                if "total" in col_map
+                else round(taxable + cgst + sgst + igst, 2)
+            )
 
-            items.append(InvoiceLineItem(
-                description=desc,
-                hsn_sac=hsn,
-                quantity=max(1.0, qty),
-                unit=unit or "Nos",
-                rate=rate,
-                discount=disc,
-                taxable_value=taxable,
-                gst_rate=gst_rate,
-                cgst_amount=cgst,
-                sgst_amount=sgst,
-                igst_amount=igst,
-                total_amount=total
-            ))
+            items.append(
+                InvoiceLineItem(
+                    description=desc,
+                    hsn_sac=hsn,
+                    quantity=max(1.0, qty),
+                    unit=unit or "Nos",
+                    rate=rate,
+                    discount=disc,
+                    taxable_value=taxable,
+                    gst_rate=gst_rate,
+                    cgst_amount=cgst,
+                    sgst_amount=sgst,
+                    igst_amount=igst,
+                    total_amount=total,
+                )
+            )
 
         if items:
             break
@@ -156,15 +180,30 @@ def parse_bank_transactions_from_markdown(markdown_text: str) -> List[BankTransa
         headers = [h.lower() for h in table[0]]
 
         # Detect bank statement headers
-        is_bank_table = any(k in headers for k in ["withdrawal", "deposit", "balance", "narration", "particulars", "dr", "cr"])
+        is_bank_table = any(
+            k in headers
+            for k in [
+                "withdrawal",
+                "deposit",
+                "balance",
+                "narration",
+                "particulars",
+                "dr",
+                "cr",
+            ]
+        )
         if not is_bank_table:
             continue
 
         col_map: Dict[str, int] = {}
         for idx, h in enumerate(headers):
-            if any(k in h for k in ["txn date", "transaction date", "value date", "date"]):
+            if any(
+                k in h for k in ["txn date", "transaction date", "value date", "date"]
+            ):
                 col_map.setdefault("date", idx)
-            elif any(k in h for k in ["narration", "description", "particulars", "remarks"]):
+            elif any(
+                k in h for k in ["narration", "description", "particulars", "remarks"]
+            ):
                 col_map.setdefault("narration", idx)
             elif any(k in h for k in ["chq", "cheque", "ref", "utr"]):
                 col_map.setdefault("ref", idx)
@@ -180,10 +219,14 @@ def parse_bank_transactions_from_markdown(markdown_text: str) -> List[BankTransa
                 continue
             date_str = row[col_map.get("date", 0)].strip()
             # Must look like a date
-            if not date_str or not re.search(r'\d', date_str):
+            if not date_str or not re.search(r"\d", date_str):
                 continue
 
-            narration = row[col_map.get("narration", 1)].strip() if "narration" in col_map else "Transaction"
+            narration = (
+                row[col_map.get("narration", 1)].strip()
+                if "narration" in col_map
+                else "Transaction"
+            )
             ref = row[col_map["ref"]].strip() if "ref" in col_map else None
             dr = abs(clean_number(row[col_map["dr"]])) if "dr" in col_map else 0.0
             cr = abs(clean_number(row[col_map["cr"]])) if "cr" in col_map else 0.0
@@ -191,7 +234,10 @@ def parse_bank_transactions_from_markdown(markdown_text: str) -> List[BankTransa
 
             # Determine Voucher Type
             narr_lower = narration.lower()
-            if any(k in narr_lower for k in ["atm cash", "cash wdl", "cash deposit", "transfer to self"]):
+            if any(
+                k in narr_lower
+                for k in ["atm cash", "cash wdl", "cash deposit", "transfer to self"]
+            ):
                 vch_type = "Contra"
             elif dr > 0:
                 vch_type = "Payment"
@@ -207,15 +253,17 @@ def parse_bank_transactions_from_markdown(markdown_text: str) -> List[BankTransa
             elif "salary" in narr_lower or "sal" in narr_lower:
                 suggested_ledger = "Salary & Wages"
 
-            transactions.append(BankTransaction(
-                transaction_date=date_str,
-                narration=narration,
-                chq_ref_no=ref,
-                withdrawal_dr=dr,
-                deposit_cr=cr,
-                balance=bal,
-                suggested_voucher_type=vch_type,
-                matched_counter_ledger=suggested_ledger,
-            ))
+            transactions.append(
+                BankTransaction(
+                    transaction_date=date_str,
+                    narration=narration,
+                    chq_ref_no=ref,
+                    withdrawal_dr=dr,
+                    deposit_cr=cr,
+                    balance=bal,
+                    suggested_voucher_type=vch_type,
+                    matched_counter_ledger=suggested_ledger,
+                )
+            )
 
     return transactions

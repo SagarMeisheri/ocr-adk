@@ -83,10 +83,18 @@ def generate_ledger_creation_xml(
     company_name: Optional[str] = None,
 ) -> str:
     """Generates Tally XML to create a new Ledger (e.g. Sundry Creditor)."""
-    company_xml = f"<STATICVARIABLES><SVCURRENTCOMPANY>{escape_xml(company_name)}</SVCURRENTCOMPANY></STATICVARIABLES>" if company_name else ""
+    company_xml = (
+        f"<STATICVARIABLES><SVCURRENTCOMPANY>{escape_xml(company_name)}</SVCURRENTCOMPANY></STATICVARIABLES>"
+        if company_name
+        else ""
+    )
     gstin_xml = f"<PARTYGSTIN>{escape_xml(gstin)}</PARTYGSTIN>" if gstin else ""
     state_xml = f"<LEDSTATENAME>{escape_xml(state)}</LEDSTATENAME>" if state else ""
-    addr_xml = f"<ADDRESS.LIST><ADDRESS>{escape_xml(address)}</ADDRESS></ADDRESS.LIST>" if address else ""
+    addr_xml = (
+        f"<ADDRESS.LIST><ADDRESS>{escape_xml(address)}</ADDRESS></ADDRESS.LIST>"
+        if address
+        else ""
+    )
 
     return f"""<ENVELOPE>
   <HEADER>
@@ -124,7 +132,11 @@ def generate_stock_item_creation_xml(
     company_name: Optional[str] = None,
 ) -> str:
     """Generates Tally XML to create a new Stock Item."""
-    company_xml = f"<STATICVARIABLES><SVCURRENTCOMPANY>{escape_xml(company_name)}</SVCURRENTCOMPANY></STATICVARIABLES>" if company_name else ""
+    company_xml = (
+        f"<STATICVARIABLES><SVCURRENTCOMPANY>{escape_xml(company_name)}</SVCURRENTCOMPANY></STATICVARIABLES>"
+        if company_name
+        else ""
+    )
     hsn_xml = f"<HSNCODE>{escape_xml(hsn_code)}</HSNCODE>" if hsn_code else ""
 
     return f"""<ENVELOPE>
@@ -154,8 +166,7 @@ def generate_stock_item_creation_xml(
 
 
 def generate_tally_purchase_voucher_xml(
-    invoice: ExtractedInvoice,
-    company_name: Optional[str] = None,
+    invoice: ExtractedInvoice, company_name: Optional[str] = None,
 ) -> str:
     """Builds a complete, standard TallyPrime F9 Purchase Voucher XML envelope."""
     date_formatted = format_tally_date(invoice.invoice_date)
@@ -164,7 +175,11 @@ def generate_tally_purchase_voucher_xml(
     supplier_gstin = invoice.supplier.gstin or ""
     supplier_state = invoice.supplier.state or ""
 
-    company_xml = f"<STATICVARIABLES><SVCURRENTCOMPANY>{escape_xml(company_name)}</SVCURRENTCOMPANY></STATICVARIABLES>" if company_name else ""
+    company_xml = (
+        f"<STATICVARIABLES><SVCURRENTCOMPANY>{escape_xml(company_name)}</SVCURRENTCOMPANY></STATICVARIABLES>"
+        if company_name
+        else ""
+    )
 
     inventory_entries_xml = []
     for item in invoice.line_items:
@@ -174,7 +189,8 @@ def generate_tally_purchase_voucher_xml(
         rate_str = f"{item.rate:.2f}/{item.unit}"
         taxable_neg = -abs(item.taxable_value)
 
-        inventory_entries_xml.append(f"""            <ALLINVENTORYENTRIES.LIST>
+        inventory_entries_xml.append(
+            f"""            <ALLINVENTORYENTRIES.LIST>
               <STOCKITEMNAME>{escape_xml(stock_name)}</STOCKITEMNAME>
               <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
               <RATE>{escape_xml(rate_str)}</RATE>
@@ -186,7 +202,8 @@ def generate_tally_purchase_voucher_xml(
                 <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
                 <AMOUNT>{taxable_neg:.2f}</AMOUNT>
               </ACCOUNTINGALLOCATIONS.LIST>
-            </ALLINVENTORYENTRIES.LIST>""")
+            </ALLINVENTORYENTRIES.LIST>"""
+        )
 
     grand_total_pos = abs(invoice.summary.grand_total)
     party_ledger_xml = f"""            <LEDGERENTRIES.LIST>
@@ -202,35 +219,43 @@ def generate_tally_purchase_voucher_xml(
 
     tax_entries_xml = []
     if invoice.summary.total_cgst > 0:
-        tax_entries_xml.append(f"""            <LEDGERENTRIES.LIST>
+        tax_entries_xml.append(
+            f"""            <LEDGERENTRIES.LIST>
               <LEDGERNAME>Input CGST 9%</LEDGERNAME>
               <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
               <AMOUNT>{-abs(invoice.summary.total_cgst):.2f}</AMOUNT>
-            </LEDGERENTRIES.LIST>""")
+            </LEDGERENTRIES.LIST>"""
+        )
 
     if invoice.summary.total_sgst > 0:
-        tax_entries_xml.append(f"""            <LEDGERENTRIES.LIST>
+        tax_entries_xml.append(
+            f"""            <LEDGERENTRIES.LIST>
               <LEDGERNAME>Input SGST 9%</LEDGERNAME>
               <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
               <AMOUNT>{-abs(invoice.summary.total_sgst):.2f}</AMOUNT>
-            </LEDGERENTRIES.LIST>""")
+            </LEDGERENTRIES.LIST>"""
+        )
 
     if invoice.summary.total_igst > 0:
-        tax_entries_xml.append(f"""            <LEDGERENTRIES.LIST>
+        tax_entries_xml.append(
+            f"""            <LEDGERENTRIES.LIST>
               <LEDGERNAME>Input IGST 18%</LEDGERNAME>
               <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
               <AMOUNT>{-abs(invoice.summary.total_igst):.2f}</AMOUNT>
-            </LEDGERENTRIES.LIST>""")
+            </LEDGERENTRIES.LIST>"""
+        )
 
     if abs(invoice.summary.round_off) >= 0.01:
         ro_val = invoice.summary.round_off
         ro_deemed = "Yes" if ro_val < 0 else "No"
         ro_amt = -abs(ro_val) if ro_val < 0 else abs(ro_val)
-        tax_entries_xml.append(f"""            <LEDGERENTRIES.LIST>
+        tax_entries_xml.append(
+            f"""            <LEDGERENTRIES.LIST>
               <LEDGERNAME>Round Off</LEDGERNAME>
               <ISDEEMEDPOSITIVE>{ro_deemed}</ISDEEMEDPOSITIVE>
               <AMOUNT>{ro_amt:.2f}</AMOUNT>
-            </LEDGERENTRIES.LIST>""")
+            </LEDGERENTRIES.LIST>"""
+        )
 
     all_inv_str = "\n".join(inventory_entries_xml)
     all_tax_str = "\n".join(tax_entries_xml)
@@ -272,6 +297,7 @@ def generate_tally_purchase_voucher_xml(
 # Bank Statement Voucher XML Generators
 # ==========================================
 
+
 def generate_tally_bank_payment_voucher_xml(
     txn: BankTransaction,
     bank_ledger: str = "Bank Account",
@@ -281,8 +307,16 @@ def generate_tally_bank_payment_voucher_xml(
     date_formatted = format_tally_date(txn.transaction_date)
     counter_ledger = txn.matched_counter_ledger or "Sundry Creditors"
     amount = abs(txn.withdrawal_dr)
-    company_xml = f"<STATICVARIABLES><SVCURRENTCOMPANY>{escape_xml(company_name)}</SVCURRENTCOMPANY></STATICVARIABLES>" if company_name else ""
-    ref_tag = f"<INSTRUMENTNUMBER>{escape_xml(txn.chq_ref_no)}</INSTRUMENTNUMBER>" if txn.chq_ref_no else ""
+    company_xml = (
+        f"<STATICVARIABLES><SVCURRENTCOMPANY>{escape_xml(company_name)}</SVCURRENTCOMPANY></STATICVARIABLES>"
+        if company_name
+        else ""
+    )
+    ref_tag = (
+        f"<INSTRUMENTNUMBER>{escape_xml(txn.chq_ref_no)}</INSTRUMENTNUMBER>"
+        if txn.chq_ref_no
+        else ""
+    )
 
     return f"""<ENVELOPE>
   <HEADER><TALLYREQUEST>Import Data</TALLYREQUEST></HEADER>
@@ -332,8 +366,16 @@ def generate_tally_bank_receipt_voucher_xml(
     date_formatted = format_tally_date(txn.transaction_date)
     counter_ledger = txn.matched_counter_ledger or "Sundry Debtors"
     amount = abs(txn.deposit_cr)
-    company_xml = f"<STATICVARIABLES><SVCURRENTCOMPANY>{escape_xml(company_name)}</SVCURRENTCOMPANY></STATICVARIABLES>" if company_name else ""
-    ref_tag = f"<INSTRUMENTNUMBER>{escape_xml(txn.chq_ref_no)}</INSTRUMENTNUMBER>" if txn.chq_ref_no else ""
+    company_xml = (
+        f"<STATICVARIABLES><SVCURRENTCOMPANY>{escape_xml(company_name)}</SVCURRENTCOMPANY></STATICVARIABLES>"
+        if company_name
+        else ""
+    )
+    ref_tag = (
+        f"<INSTRUMENTNUMBER>{escape_xml(txn.chq_ref_no)}</INSTRUMENTNUMBER>"
+        if txn.chq_ref_no
+        else ""
+    )
 
     return f"""<ENVELOPE>
   <HEADER><TALLYREQUEST>Import Data</TALLYREQUEST></HEADER>
@@ -383,7 +425,11 @@ def generate_tally_bank_contra_voucher_xml(
     """Generates Tally F4 Contra Voucher for cash withdrawals/transfers."""
     date_formatted = format_tally_date(txn.transaction_date)
     amount = abs(txn.withdrawal_dr) if txn.withdrawal_dr > 0 else abs(txn.deposit_cr)
-    company_xml = f"<STATICVARIABLES><SVCURRENTCOMPANY>{escape_xml(company_name)}</SVCURRENTCOMPANY></STATICVARIABLES>" if company_name else ""
+    company_xml = (
+        f"<STATICVARIABLES><SVCURRENTCOMPANY>{escape_xml(company_name)}</SVCURRENTCOMPANY></STATICVARIABLES>"
+        if company_name
+        else ""
+    )
 
     return f"""<ENVELOPE>
   <HEADER><TALLYREQUEST>Import Data</TALLYREQUEST></HEADER>

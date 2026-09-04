@@ -45,7 +45,9 @@ def sync_single_invoice(invoice_id: str, direct_approve: bool = False):
 
     tally_xml = inv.get("tally_xml")
     if not tally_xml:
-        raise HTTPException(status_code=400, detail="Tally XML has not been generated for this invoice")
+        raise HTTPException(
+            status_code=400, detail="Tally XML has not been generated for this invoice"
+        )
 
     # Generate auto-creation XMLs for missing masters if needed
     auto_masters_xml = []
@@ -53,14 +55,16 @@ def sync_single_invoice(invoice_id: str, direct_approve: bool = False):
     if inv_data:
         if inv_data.get("auto_create_party_ledger"):
             supplier = inv_data.get("supplier", {})
-            party_name = inv_data.get("matched_tally_party_ledger") or supplier.get("name")
+            party_name = inv_data.get("matched_tally_party_ledger") or supplier.get(
+                "name"
+            )
             if party_name:
                 m_xml = generate_ledger_creation_xml(
                     name=party_name,
                     parent="Sundry Creditors",
                     gstin=supplier.get("gstin"),
                     state=supplier.get("state"),
-                    address=supplier.get("address")
+                    address=supplier.get("address"),
                 )
                 auto_masters_xml.append(m_xml)
                 # Stage master creation in HITL gate
@@ -73,13 +77,15 @@ def sync_single_invoice(invoice_id: str, direct_approve: bool = False):
 
         if inv_data.get("auto_create_stock_items"):
             for item in inv_data.get("line_items", []):
-                item_name = item.get("matched_tally_stock_item") or item.get("description")
+                item_name = item.get("matched_tally_stock_item") or item.get(
+                    "description"
+                )
                 if item_name:
                     s_xml = generate_stock_item_creation_xml(
                         name=item_name,
                         base_units=item.get("unit", "Nos"),
                         hsn_code=item.get("hsn_sac"),
-                        gst_rate=item.get("gst_rate", 18.0)
+                        gst_rate=item.get("gst_rate", 18.0),
                     )
                     auto_masters_xml.append(s_xml)
                     # Stage stock item creation in HITL gate
@@ -140,7 +146,7 @@ def batch_sync_ready_invoices():
     return {
         "status": "success",
         "staged_count": staged_count,
-        "message": f"{staged_count} high-confidence vouchers staged for Human-in-the-Loop review and approval."
+        "message": f"{staged_count} high-confidence vouchers staged for Human-in-the-Loop review and approval.",
     }
 
 
@@ -152,7 +158,7 @@ def connector_heartbeat(payload: HeartbeatPayload):
         client_id=payload.client_id,
         tally_online=payload.tally_online,
         company_name=payload.company_name,
-        error=payload.error
+        error=payload.error,
     )
     return {"status": "ack"}
 
@@ -173,6 +179,6 @@ def report_sync_result(report: SyncReportPayload):
         id=report.invoice_id,
         status=new_status,
         voucher_number=report.voucher_number,
-        error_message=report.error_message
+        error_message=report.error_message,
     )
     return {"status": "recorded"}

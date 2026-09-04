@@ -50,11 +50,11 @@ export const Header: React.FC<HeaderProps> = ({
                   TrulyTally<span style={{ color: '#38bdf8' }}>.AI</span>
                 </h1>
                 <span className="pill pill-blue" style={{ fontSize: '10px', padding: '2px 7px' }}>
-                  ADK 2.0 • MCP
+                  Document Studio
                 </span>
               </div>
               <p style={{ fontSize: '11px', color: 'var(--text-secondary)', margin: '1px 0 0 0' }}>
-                GST Invoices &amp; Multi-Page Bank Statements &bull; Deterministic Tally Sync
+                Universal AI Extraction &bull; Invoices, Bank Statements, Receipts &amp; Bills &bull; Gemini 3.8 Flash
               </p>
             </div>
           </div>
@@ -67,40 +67,18 @@ export const Header: React.FC<HeaderProps> = ({
                 display: 'flex',
                 alignItems: 'center',
                 gap: '6px',
-                padding: '6px 12px',
+                padding: '6px 14px',
                 borderRadius: '8px',
                 fontSize: '12px',
                 fontWeight: 600,
                 border: 'none',
                 cursor: 'pointer',
-                background: activeTab === 'invoices' ? 'rgba(37, 99, 235, 0.25)' : 'transparent',
-                color: activeTab === 'invoices' ? '#60a5fa' : '#94a3b8',
+                background: activeTab === 'invoices' ? '#2563eb' : 'transparent',
+                color: activeTab === 'invoices' ? '#fff' : 'var(--text-secondary)',
                 transition: 'all 0.15s ease',
               }}
             >
-              <FileText size={14} />
-              <span>Purchase Invoices</span>
-            </button>
-
-            <button
-              onClick={() => onTabChange('banking')}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                padding: '6px 12px',
-                borderRadius: '8px',
-                fontSize: '12px',
-                fontWeight: 600,
-                border: 'none',
-                cursor: 'pointer',
-                background: activeTab === 'banking' ? 'rgba(37, 99, 235, 0.25)' : 'transparent',
-                color: activeTab === 'banking' ? '#60a5fa' : '#94a3b8',
-                transition: 'all 0.15s ease',
-              }}
-            >
-              <Landmark size={14} />
-              <span>Bank Statements</span>
+              <FileText size={14} /> Documents Studio
             </button>
 
             <button
@@ -109,19 +87,18 @@ export const Header: React.FC<HeaderProps> = ({
                 display: 'flex',
                 alignItems: 'center',
                 gap: '6px',
-                padding: '6px 12px',
+                padding: '6px 14px',
                 borderRadius: '8px',
                 fontSize: '12px',
                 fontWeight: 600,
                 border: 'none',
                 cursor: 'pointer',
-                background: activeTab === 'hitl' ? 'rgba(245, 158, 11, 0.25)' : 'transparent',
-                color: activeTab === 'hitl' ? '#fbbf24' : '#94a3b8',
+                background: activeTab === 'hitl' ? '#2563eb' : 'transparent',
+                color: activeTab === 'hitl' ? '#fff' : 'var(--text-secondary)',
                 transition: 'all 0.15s ease',
               }}
             >
-              <ShieldAlert size={14} color={activeTab === 'hitl' ? '#fbbf24' : '#94a3b8'} />
-              <span>Pending Approvals</span>
+              <ShieldAlert size={14} /> HITL Safety Gate
               {pendingHitlCount > 0 && (
                 <span style={{
                   padding: '1px 6px',
@@ -144,30 +121,30 @@ export const Header: React.FC<HeaderProps> = ({
           
           {/* Tally Status Pill */}
           <div 
-            onClick={onRefreshTally}
-            title="Click to recheck Tally connection on Port 9000"
+            onClick={onOpenSettings}
+            title="Click to view Tally connection options or switch to Windows Tally"
             style={{
               display: 'flex',
               alignItems: 'center',
               gap: '10px',
               padding: '6px 14px',
               borderRadius: '9999px',
-              background: tallyStatus.online ? 'rgba(16, 185, 129, 0.12)' : 'rgba(239, 68, 68, 0.12)',
-              border: `1px solid ${tallyStatus.online ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
+              background: tallyStatus.online ? 'rgba(16, 185, 129, 0.12)' : 'rgba(59, 130, 246, 0.12)',
+              border: `1px solid ${tallyStatus.online ? 'rgba(16, 185, 129, 0.3)' : 'rgba(59, 130, 246, 0.25)'}`,
               cursor: 'pointer',
               transition: 'all 0.2s ease',
             }}
           >
-            <span className={`pulse-dot ${tallyStatus.online ? 'online' : 'offline'}`} />
+            <span className={`pulse-dot ${tallyStatus.online ? 'online' : 'online'}`} style={{ background: tallyStatus.online ? '#10b981' : '#38bdf8' }} />
             <div>
-              <div style={{ fontSize: '12px', fontWeight: 600, color: tallyStatus.online ? '#34d399' : '#f87171' }}>
-                {tallyStatus.online ? `Tally Connected: ${tallyStatus.company_name}` : 'Tally Connector Offline'}
+              <div style={{ fontSize: '12px', fontWeight: 600, color: tallyStatus.online ? '#34d399' : '#38bdf8' }}>
+                {tallyStatus.online ? `Tally: ${tallyStatus.company_name}` : 'Standalone Mode'}
               </div>
               <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
-                {tallyStatus.online ? 'Port 9000 XML / MCP Ready' : 'Click for setup instructions'}
+                {tallyStatus.online ? 'Port 9000 Live' : 'AI Extraction Active'}
               </div>
             </div>
-            <RefreshCw size={13} color="var(--text-muted)" style={{ marginLeft: '4px' }} />
+            <Settings size={13} color="var(--text-muted)" style={{ marginLeft: '4px' }} />
           </div>
 
           {/* Batch Sync Button (if any auto_ready invoices) */}

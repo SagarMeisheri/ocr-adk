@@ -79,8 +79,8 @@ flowchart TD
 # Clone the repository
 cd ocr-adk
 
-# Install Python backend dependencies
-pip install -r backend/requirements.txt
+# Install Python backend dependencies using uv
+uv sync
 
 # Install React frontend dependencies
 cd frontend
@@ -88,11 +88,18 @@ npm install
 cd ..
 ```
 
-### 3. Configure Environment Variables (Optional for Gemini API)
+### 3. Configure Environment Variables (.env)
+
+Create or edit `.env` in the root directory (or copy from `.env.example`):
 
 ```bash
-export GEMINI_API_KEY="your-gemini-api-key"
-export GEMINI_MODEL="gemini-2.5-flash"  # or gemini-3.8-flash
+cp .env.example .env
+```
+
+Set your configuration values inside `.env`:
+```dotenv
+GEMINI_API_KEY="your-gemini-api-key"
+GEMINI_MODEL="gemini-2.5-flash"  # or gemini-3.8-flash
 ```
 *(Note: If `GEMINI_API_KEY` is not provided, the platform automatically runs in high-fidelity demo mode with realistic Indian GST invoices).*
 
@@ -100,7 +107,7 @@ export GEMINI_MODEL="gemini-2.5-flash"  # or gemini-3.8-flash
 
 ```bash
 # One-click launcher: starts Backend (Port 8000), Virtual Tally (Port 9000), and Connector
-python run.py
+uv run python run.py
 ```
 
 In a second terminal window, run the Vite frontend:
@@ -154,5 +161,5 @@ Once deployed, your accountant runs `python tally_connector.py --server https://
 Run the full pytest suite for GSTIN checksum, tax math validation, and Tally XML generation:
 
 ```bash
-pytest backend/tests/
+uv run pytest backend/tests/
 ```

@@ -28,6 +28,7 @@ class PyPdfPreprocessor:
 
         try:
             import pypdf
+
             reader = pypdf.PdfReader(file_path)
             page_count = len(reader.pages)
             pages_text: List[str] = []
@@ -48,10 +49,20 @@ class PyPdfPreprocessor:
 
             # Check if document looks like a bank statement
             lower_full = "\n".join(pages_text).lower()
-            is_bank_statement = any(k in lower_full for k in [
-                "statement of account", "bank statement", "transaction date",
-                "withdrawal", "deposit", "balance", "chq/ref", "cr/dr", "opening balance"
-            ])
+            is_bank_statement = any(
+                k in lower_full
+                for k in [
+                    "statement of account",
+                    "bank statement",
+                    "transaction date",
+                    "withdrawal",
+                    "deposit",
+                    "balance",
+                    "chq/ref",
+                    "cr/dr",
+                    "opening balance",
+                ]
+            )
 
             return {
                 "is_pdf": True,
