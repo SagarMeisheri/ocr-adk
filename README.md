@@ -15,12 +15,17 @@ flowchart TD
     A[Upload Bills: PDF, JPG, WhatsApp, Handwritten] --> B[FastAPI Web Backend]
     B --> C[Google ADK 2.0 Pipeline]
     
-    subgraph ADK 2.0 & Gemini 3.8 Flash
-        C --> D[Preprocessor & Document Normalizer]
-        D --> E[Gemini 3.8 Flash Vision Extractor]
-        E --> F[Deterministic Rule Validator\n- GSTIN Luhn Mod-36 Checksum\n- Intra vs Inter-State Tax Check\n- Qty*Rate=Taxable Math Audit]
-        F --> G[Tally Master Fuzzy Matcher\n- Sundry Creditors\n- Stock Items & HSN]
-        G --> H[Tri-Queue Triage Gateway]
+    subgraph ADK 2.0 & Gemini 3.8 Flash Parallel Graph
+        C --> D[Stage 1: Preprocessor & Document Normalizer]
+        D --> E[Stage 2: Gemini 3.8 Flash Vision Extractor & Planner]
+        E --> F1[Stage 3a: Math Validation Agent\n- Safe AST Batch Calculations\n- Quantity x Rate & Total Checks]
+        E --> F2[Stage 3b: Tally & GST Compliance Agent\n- GSTIN Luhn Mod-36 Checksum\n- Ledger Matching & Duplicate Checks]
+        F1 --> G[Validation Join Node]
+        F2 --> G
+        G --> H[Stage 4: Compliance Triage & Staging Gateway]
+        H -. "Revision Loop (Auto-Fix)" .-> R[Stage 3.5: Reconciliation Revision Agent]
+        R -.-> F1
+        R -.-> F2
     end
 
     H --> I1[🟢 Auto-Ready Queue >90%]

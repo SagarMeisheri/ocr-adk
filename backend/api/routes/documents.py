@@ -101,16 +101,16 @@ async def upload_documents(
                 raw_markdown=parsed_doc.raw_markdown,
                 confidence_score=parsed_doc.confidence_score,
                 status="transcribed",
-                tally_xml=None,
+                tally_xml=tally_xml,
                 tags=parsed_doc.tags,
                 workflow_execution=wf.model_dump() if wf else None,
-                validation=None,
+                validation=parsed_doc.validation,
                 thinking_process=parsed_doc.thinking_process,
                 thoughts_token_count=parsed_doc.thoughts_token_count or 0,
             )
 
             print(
-                f"[ADK Engine] Transcribed: {parsed_doc.title} ({len(parsed_doc.raw_markdown)} chars markdown)"
+                f"[ADK Engine] Transcribed & Validated: {parsed_doc.title} ({len(parsed_doc.raw_markdown)} chars markdown)"
             )
 
             results.append(
@@ -128,6 +128,8 @@ async def upload_documents(
                     "confidence_score": parsed_doc.confidence_score,
                     "status": "transcribed",
                     "workflow_execution": wf.model_dump() if wf else None,
+                    "validation": parsed_doc.validation,
+                    "tally_xml": tally_xml,
                 }
             )
 

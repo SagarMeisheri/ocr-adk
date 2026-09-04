@@ -57,6 +57,7 @@ truly_tally.db*
 uploads/
 backend/uploads/
 uploads/banking/
+traces/
 
 # Environment Variables & Secrets
 .env

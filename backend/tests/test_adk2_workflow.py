@@ -276,7 +276,104 @@ Grand Total: ₹1,180.00
         self.assertEqual(len(sha), 64)
         self.assertTrue(all(c in "0123456789abcdefABCDEF" for c in sha))
 
+    def test_otel_tracer_spans_and_export(self):
+        """Verifies OpenTelemetry tracing spans are collected with GenAI semantic conventions."""
+        import tempfile
+        from pathlib import Path
+        from backend.adk_engine.otel_tracer import (
+            trace_workflow,
+            trace_stage,
+            trace_agent,
+            get_collected_spans,
+            save_traces_to_json,
+            clear_collected_spans,
+        )
+
+        clear_collected_spans()
+
+        with trace_workflow("test_workflow", "doc-123", {"source": "unit_test"}):
+            with trace_stage("Stage 1", "step_ingestion"):
+                pass
+            with trace_agent("math_agent", "task", {"items": 5}):
+                pass
+
+        spans = get_collected_spans()
+        self.assertEqual(len(spans), 3)
+
+        span_names = [s["name"] for s in spans]
+        self.assertIn("invoke_node step_ingestion", span_names)
+        self.assertIn("invoke_agent math_agent", span_names)
+        self.assertIn("invoke_workflow test_workflow", span_names)
+
+        # Verify attributes
+        agent_span = next(s for s in spans if "math_agent" in s["name"])
+        self.assertEqual(agent_span["attributes"]["gen_ai.operation.name"], "invoke_agent")
+        self.assertEqual(agent_span["attributes"]["gen_ai.agent.name"], "math_agent")
+
+        # Test export to JSON
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tf:
+            trace_json_path = tf.name
+        saved_path = save_traces_to_json(trace_json_path)
+        self.assertTrue(Path(saved_path).exists())
+
+    def test_invoice_pipeline_agent_tool_registration(self):
+        """Verifies agents/invoice_pipeline root_agent registers all required tools."""
+        from agents.invoice_pipeline.agent import root_agent
+        self.assertIsNotNone(root_agent)
+        self.assertEqual(root_agent.name, "invoice_pipeline_agent")
+        tool_names = [getattr(t, "__name__", getattr(t, "name", str(t))) for t in root_agent.tools]
+        self.assertIn("validate_invoice_document", tool_names)
+        self.assertIn("calculate_batch", tool_names)
+        self.assertIn("calculate", tool_names)
+        self.assertIn("validate_gstin", tool_names)
+
+    def test_document_ingestion_and_image_stripping(self):
+        """Verifies ingestion resolves paths and extraction outputs pure markdown without image payload."""
+        from backend.adk_engine.workflow import (
+            document_ingestion_node,
+            gemini_multimodal_extraction_node,
+            final_staging_node,
+            extract_file_path_from_node_input,
+        )
+
+        # Test string path normalization
+        dummy_path = "uploads/test_invoice.png"
+        Path("uploads").mkdir(parents=True, exist_ok=True)
+        Path(dummy_path).write_bytes(b"dummy image bytes")
+
+        res_path = extract_file_path_from_node_input(dummy_path)
+        self.assertEqual(res_path, dummy_path)
+
+        # Ingestion node passes string path
+        ingest_res = document_ingestion_node(node_input=dummy_path)
+        self.assertEqual(ingest_res, dummy_path)
+
+        # Extraction node returns string markdown (not binary image/dict)
+        extract_res = gemini_multimodal_extraction_node(node_input=dummy_path)
+        self.assertIsInstance(extract_res, str)
+        self.assertFalse(isinstance(extract_res, (bytes, bytearray)))
+
+        # Final staging node appends AST Math Proof
+        final_res = final_staging_node(node_input=extract_res)
+        self.assertIn("Deterministic AST Math Proof", final_res)
+        self.assertIn("PASS", final_res)
+
+        # Cleanup
+        if Path(dummy_path).exists():
+            Path(dummy_path).unlink()
+
+    def test_tally_validation_node_offline_skips_llm(self):
+        """Verifies tally_validation_node cleanly skips when Tally is offline to save Gemini API calls."""
+        from backend.adk_engine.workflow import tally_validation_node
+        res = tally_validation_node(node_input="sample markdown")
+        self.assertIsInstance(res, dict)
+        self.assertIn("status", res)
+        # In test environment where port 9000 is closed, status should be 'skipped'
+        self.assertEqual(res["status"], "skipped")
+        self.assertEqual(res["tally_connection_mode"], "offline")
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

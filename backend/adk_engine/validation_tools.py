@@ -19,8 +19,15 @@ from .models import (
     GstinValidationDetail,
     TallyValidationDetail,
 )
-from .validator import validate_gstin
-from ..tally_bridge.virtual_tally import GLOBAL_TALLY_STATE
+try:
+    from .validator import validate_gstin
+except (ImportError, ValueError):
+    from backend.adk_engine.validator import validate_gstin
+
+try:
+    from ..tally_bridge.virtual_tally import GLOBAL_TALLY_STATE
+except (ImportError, ValueError):
+    from backend.tally_bridge.virtual_tally import GLOBAL_TALLY_STATE
 
 
 # ==============================================================================
@@ -598,6 +605,18 @@ def verify_grand_total_equation(
 # ==============================================================================
 # 4. Tally Database & GST Compliance Query Tools
 # ==============================================================================
+
+def is_tally_connected(tally_host: str = "127.0.0.1", tally_port: int = 9000) -> bool:
+    """Checks whether live TallyPrime or Tally connector is reachable on host:port."""
+    if os.environ.get("TALLY_ENABLED", "").lower() in ("false", "0", "no"):
+        return False
+    import socket
+    try:
+        with socket.create_connection((tally_host, tally_port), timeout=0.15):
+            return True
+    except (OSError, ConnectionRefusedError):
+        return False
+
 
 def query_tally_party_by_gstin(
     gstin: Optional[str],
