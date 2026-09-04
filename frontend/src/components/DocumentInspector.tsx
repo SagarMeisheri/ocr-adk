@@ -163,10 +163,29 @@ export const DocumentInspector: React.FC<DocumentInspectorProps> = ({
         </div>
       </div>
 
-      {/* Main Split Screen Workspace */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', minHeight: 'calc(100vh - 220px)' }}>
+      {/* Main Split Screen Workspace: Locked to identical standard 1-page height */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: '1fr 1fr',
+          gap: '20px',
+          height: 'calc(100vh - 195px)',
+          minHeight: '680px',
+          boxSizing: 'border-box',
+        }}
+      >
         {/* Left Pane: Document Preview */}
-        <div className="glass-panel" style={{ padding: '16px', display: 'flex', flexDirection: 'column' }}>
+        <div
+          className="glass-panel"
+          style={{
+            padding: '16px',
+            display: 'flex',
+            flexDirection: 'column',
+            height: '100%',
+            overflow: 'hidden',
+            boxSizing: 'border-box',
+          }}
+        >
           <div
             style={{
               display: 'flex',
@@ -175,6 +194,8 @@ export const DocumentInspector: React.FC<DocumentInspectorProps> = ({
               marginBottom: '12px',
               paddingBottom: '8px',
               borderBottom: '1px solid var(--border-subtle)',
+              minHeight: '34px',
+              flexShrink: 0,
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -226,13 +247,13 @@ export const DocumentInspector: React.FC<DocumentInspectorProps> = ({
           <div
             style={{
               flex: 1,
+              minHeight: 0,
               overflow: 'auto',
               background: 'rgba(15, 23, 42, 0.6)',
               borderRadius: '8px',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              minHeight: '560px',
               padding: '12px',
             }}
           >
@@ -243,7 +264,6 @@ export const DocumentInspector: React.FC<DocumentInspectorProps> = ({
                 style={{
                   width: '100%',
                   height: '100%',
-                  minHeight: '560px',
                   border: 'none',
                   borderRadius: '6px',
                   transform: `scale(${zoom}) rotate(${rotation}deg)`,
@@ -274,16 +294,16 @@ export const DocumentInspector: React.FC<DocumentInspectorProps> = ({
         <div
           className="glass-panel"
           style={{
-            padding: '20px',
+            padding: '16px',
             display: 'flex',
             flexDirection: 'column',
-            gap: '12px',
-            overflowY: 'auto',
-            maxHeight: 'calc(100vh - 220px)',
+            height: '100%',
+            overflow: 'hidden',
+            boxSizing: 'border-box',
           }}
         >
           {activeTab === 'reasoning' ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '16px', paddingRight: '4px' }}>
               {/* Header card with thinking statistics */}
               <div
                 style={{
@@ -430,15 +450,15 @@ export const DocumentInspector: React.FC<DocumentInspectorProps> = ({
               )}
             </div>
           ) : activeTab === 'workflow' ? (
-            <div>
-              <h4 style={{ fontSize: '14px', fontWeight: 600, color: '#fff', marginBottom: '14px' }}>
+            <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingRight: '4px' }}>
+              <h4 style={{ fontSize: '14px', fontWeight: 600, color: '#fff', marginBottom: '14px', flexShrink: 0 }}>
                 Google ADK Workflow Execution DAG
               </h4>
               <WorkflowGraph execution={doc.workflow_execution} isLive={false} compact={false} />
             </div>
           ) : activeTab === 'raw' ? (
-            <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+            <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px', flexShrink: 0 }}>
                 <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)' }}>
                   Raw Markdown Source Code
                 </span>
@@ -457,7 +477,7 @@ export const DocumentInspector: React.FC<DocumentInspectorProps> = ({
                 style={{
                   width: '100%',
                   flex: 1,
-                  minHeight: '520px',
+                  minHeight: 0,
                   background: 'rgba(15, 23, 42, 0.85)',
                   border: '1px solid rgba(56, 189, 248, 0.25)',
                   borderRadius: '8px',
@@ -473,7 +493,7 @@ export const DocumentInspector: React.FC<DocumentInspectorProps> = ({
               />
             </div>
           ) : (
-            <div>
+            <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
               <div
                 style={{
                   display: 'flex',
@@ -482,6 +502,8 @@ export const DocumentInspector: React.FC<DocumentInspectorProps> = ({
                   marginBottom: '12px',
                   paddingBottom: '8px',
                   borderBottom: '1px solid var(--border-subtle)',
+                  minHeight: '34px',
+                  flexShrink: 0,
                 }}
               >
                 <span style={{ fontSize: '13px', fontWeight: 600, color: '#38bdf8', display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
@@ -500,6 +522,7 @@ export const DocumentInspector: React.FC<DocumentInspectorProps> = ({
                     borderRadius: '8px',
                     padding: '10px 14px',
                     marginBottom: '14px',
+                    flexShrink: 0,
                   }}
                 >
                   <div
@@ -553,7 +576,16 @@ export const DocumentInspector: React.FC<DocumentInspectorProps> = ({
                 </div>
               )}
 
-              <MarkdownView content={rawOutput} />
+              <div
+                style={{
+                  flex: 1,
+                  minHeight: 0,
+                  overflowY: 'auto',
+                  paddingRight: '6px',
+                }}
+              >
+                <MarkdownView content={rawOutput} />
+              </div>
             </div>
           )}
         </div>

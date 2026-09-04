@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 import os
+import base64
 import mimetypes
 from typing import Optional, Dict, Any, Union, Tuple
 from pathlib import Path
@@ -35,6 +36,8 @@ Rules:
 class HybridExtractor:
     """Document transcription engine using Gemini Multimodal Vision to produce layout-preserving Markdown."""
 
+    FILES_API_THRESHOLD_BYTES = 10 * 1024 * 1024  # 10 MB
+
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = (
             api_key
@@ -43,6 +46,7 @@ class HybridExtractor:
         )
         self.model_name = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
         self.thinking_level = os.environ.get("GEMINI_THINKING_LEVEL", "low").lower()
+        self.media_resolution = os.environ.get("GEMINI_MEDIA_RESOLUTION", "high").lower()
 
     def extract_universal_document(self, file_path: str) -> ParsedDocument:
         """Transcribes document directly into Markdown preserving visual layout and tables."""
@@ -65,9 +69,58 @@ class HybridExtractor:
             else:
                 mime_type = "image/jpeg"
 
+        file_size = os.path.getsize(file_path)
+        is_pdf = mime_type == "application/pdf" or file_path.lower().endswith(".pdf")
+        doc_type_key = "document" if is_pdf else "image"
+
         with open(file_path, "rb") as f:
             file_bytes = f.read()
 
+        payload_method = "inline_base64"
+
+        # Hybrid strategy: use Files API for files >= 10MB if supported
+        if file_size >= self.FILES_API_THRESHOLD_BYTES and hasattr(client, "files") and hasattr(client.files, "upload"):
+            try:
+                uploaded = client.files.upload(file=file_path)
+                uploaded_uri = getattr(uploaded, "uri", None) or (
+                    uploaded.get("uri") if isinstance(uploaded, dict) else None
+                )
+                uploaded_mime = getattr(uploaded, "mime_type", None) or (
+                    uploaded.get("mime_type") if isinstance(uploaded, dict) else None
+                ) or mime_type
+                media_item: Dict[str, Any] = {
+                    "type": doc_type_key,
+                    "uri": uploaded_uri,
+                    "mime_type": uploaded_mime,
+                }
+                payload_method = "files_api"
+            except Exception as up_err:
+                print(f"[HybridExtractor] Files API upload notice (falling back to inline): {up_err}")
+                b64_data = base64.b64encode(file_bytes).decode("utf-8")
+                media_item = {
+                    "type": doc_type_key,
+                    "data": b64_data,
+                    "mime_type": mime_type,
+                }
+        else:
+            b64_data = base64.b64encode(file_bytes).decode("utf-8")
+            media_item = {
+                "type": doc_type_key,
+                "data": b64_data,
+                "mime_type": mime_type,
+            }
+
+        # Apply media resolution if image block
+        if doc_type_key == "image" and self.media_resolution in ("low", "medium", "high", "ultra_high"):
+            media_item["resolution"] = self.media_resolution
+
+        # Gemini Interactions API input format
+        interactions_input = [
+            media_item,
+            {"type": "text", "text": DOCUMENT_TRANSCRIPTION_PROMPT},
+        ]
+
+        # Legacy payload fallback for generate_content
         content_payload = [
             types.Part.from_bytes(data=file_bytes, mime_type=mime_type),
             DOCUMENT_TRANSCRIPTION_PROMPT,
@@ -83,7 +136,7 @@ class HybridExtractor:
             try:
                 interaction = client.interactions.create(
                     model=self.model_name,
-                    input=content_payload,
+                    input=interactions_input,
                     generation_config={
                         "thinking_level": self.thinking_level,
                         "thinking_summaries": "auto",
@@ -205,6 +258,10 @@ class HybridExtractor:
         elif raw_markdown.startswith("```") and raw_markdown.endswith("```"):
             raw_markdown = raw_markdown[3:-3].strip()
 
+        tags = ["transcribed", "markdown_engine", f"payload:{payload_method}"]
+        if self.media_resolution:
+            tags.append(f"res:{self.media_resolution}")
+
         return ParsedDocument(
             doc_type="document",
             title=stem_title,
@@ -212,7 +269,7 @@ class HybridExtractor:
             thinking_process=thinking_process,
             thoughts_token_count=thoughts_token_count,
             confidence_score=0.99,
-            tags=["transcribed", "markdown_engine"],
+            tags=tags,
             status="extracted",
         )
 

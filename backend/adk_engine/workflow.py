@@ -151,10 +151,15 @@ class UniversalDocumentPipeline:
             {
                 "model": self.extractor.model_name,
                 "thinking_level": self.extractor.thinking_level,
+                "media_resolution": self.extractor.media_resolution,
             },
         )
         parsed_doc = self.extractor.extract_universal_document(file_path)
         parsed_doc.id = doc_id
+        payload_method = next(
+            (t.split(":", 1)[1] for t in parsed_doc.tags if t.startswith("payload:")),
+            "inline_base64",
+        )
         update_step(
             "gemini_multimodal_extraction",
             "completed",
@@ -164,6 +169,8 @@ class UniversalDocumentPipeline:
                 "markdown_chars": len(parsed_doc.raw_markdown),
                 "confidence": parsed_doc.confidence_score,
                 "thinking_level": self.extractor.thinking_level,
+                "media_resolution": self.extractor.media_resolution,
+                "payload_method": payload_method,
                 "thinking_steps_count": len(parsed_doc.thinking_process or []),
                 "thoughts_token_count": parsed_doc.thoughts_token_count or 0,
                 "thinking_summary": parsed_doc.thinking_process[:2] if parsed_doc.thinking_process else [],
