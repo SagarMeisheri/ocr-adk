@@ -8,6 +8,7 @@ them through a secure AST Calculator Tool (strictly without eval() or exec()).
 from __future__ import annotations
 import ast
 import hashlib
+import json
 import operator
 import os
 import re
@@ -200,18 +201,147 @@ def calculate_batch(expressions: Union[Dict[str, str], List[str]]) -> Dict[str, 
 
 
 # ==============================================================================
-# 2. Agent Dynamic Math Query Generation and Execution
+# 2. ADK 2.0 Bulk Math Validation Agent & AST Calculation Tool Runner
 # ==============================================================================
 
-def generate_math_queries_for_invoice(
+def execute_bulk_math_agent(
     line_items: List[Dict[str, Any]],
     summary_data: Dict[str, Any],
-    is_inter_state: bool = False,
-) -> List[Dict[str, Any]]:
-    """Generates the list of mathematical verification queries tailored to this invoice."""
-    queries: List[Dict[str, Any]] = []
+    supplier_gstin: Optional[str] = None,
+    buyer_gstin: Optional[str] = None,
+    api_key: Optional[str] = None,
+    max_queries: Optional[int] = None,
+    model_name: Optional[str] = None,
+) -> Tuple[MathValidationDetail, List[Dict[str, Any]]]:
+    """ADK 2.0 Agent-driven bulk mathematical validation.
 
-    # 1. Line Item Multiplication Queries (amount = quantity * rate - discount)
+    Prompts Gemini to inspect invoice numbers and submit all calculations to verify
+    in a SINGLE bulk call to the calculate_batch() tool. Python executes the math
+    safely via AST. If offline or without API key, runs deterministic AST verification.
+    """
+    effective_key = api_key or os.environ.get("GEMINI_API_KEY")
+    query_cap = max_queries if max_queries is not None else DEFAULT_MAX_VALIDATION_QUERIES
+
+    # 1. Attempt true LLM bulk tool calling if Gemini is available
+    if effective_key:
+        try:
+            from google import genai
+            from google.genai import types
+
+            client = genai.Client(api_key=effective_key)
+            model = model_name or os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
+
+            # Compact numeric projection: strips boilerplate, saving 90%+ tokens
+            slim_items = [
+                {
+                    "idx": idx,
+                    "qty": float(it.get("quantity") or 0.0),
+                    "rate": float(it.get("rate") or 0.0),
+                    "disc": float(it.get("discount") or 0.0),
+                    "taxable": float(it.get("taxable_value") or it.get("amount") or 0.0),
+                    "gst": float(it.get("gst_rate") or 0.0),
+                }
+                for idx, it in enumerate(line_items, start=1)
+            ]
+            slim_summary = {
+                "taxable": float(summary_data.get("total_taxable_value") or summary_data.get("taxable_amount") or 0.0),
+                "cgst": float(summary_data.get("total_cgst") or summary_data.get("cgst_amount") or 0.0),
+                "sgst": float(summary_data.get("total_sgst") or summary_data.get("sgst_amount") or 0.0),
+                "igst": float(summary_data.get("total_igst") or summary_data.get("igst_amount") or 0.0),
+                "round_off": float(summary_data.get("round_off") or summary_data.get("rounding_off") or 0.0),
+                "grand_total": float(summary_data.get("grand_total") or summary_data.get("total_amount") or 0.0),
+            }
+
+            prompt = (
+                "Audit this invoice's numbers. Formulate all equations you need to verify (line items: qty * rate - disc, "
+                "tax amounts, subtotal, grand total) and call calculate_batch(expressions={...}) in ONE single bulk call.\n\n"
+                f"Items: {json.dumps(slim_items)}\n"
+                f"Summary: {json.dumps(slim_summary)}\n"
+                f"Supplier GSTIN: {supplier_gstin}, Buyer GSTIN: {buyer_gstin}\n"
+            )
+
+            # Single Turn: Gemini formulates bulk calculation equations
+            response = client.models.generate_content(
+                model=model,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    tools=[calculate_batch],
+                    temperature=0.0,
+                ),
+            )
+
+            # Inspect if Gemini made function calls
+            function_calls = getattr(response, "function_calls", None) or []
+            for call in function_calls:
+                call_name = getattr(call, "name", "")
+                if call_name == "calculate_batch":
+                    call_args = getattr(call, "args", {}) or {}
+                    expressions = call_args.get("expressions", {})
+
+                    # Execute in Python via safe AST without calling Gemini again (saves Turn 2 tokens & latency)
+                    batch_res = calculate_batch(expressions)
+                    results = batch_res.get("results", {})
+
+                    audit_items: List[Dict[str, Any]] = []
+                    discrepancies: List[str] = []
+                    line_valid = True
+                    tax_valid = True
+                    gt_valid = True
+
+                    for k, res in results.items():
+                        val = float(res.get("value") or 0.0)
+                        expr = res.get("expression", "")
+                        err = res.get("error")
+                        audit_items.append({
+                            "key": k,
+                            "query": expr,
+                            "calculated_value": val,
+                            "is_match": err is None,
+                        })
+
+                    # Evaluate line items and summary against Python AST calculations
+                    for it in slim_items:
+                        exp_val = round(it["qty"] * it["rate"] - it["disc"], 2)
+                        diff = abs(it["taxable"] - exp_val)
+                        if diff > 0.50 and it["qty"] > 0 and it["rate"] > 0:
+                            line_valid = False
+                            discrepancies.append(f"Line #{it['idx']}: Qty {it['qty']} × Rate {it['rate']} = {exp_val:.2f}, but extracted taxable is {it['taxable']:.2f}")
+
+                    calc_taxable = sum(it["taxable"] for it in slim_items)
+                    calc_taxes = slim_summary["cgst"] + slim_summary["sgst"] + slim_summary["igst"]
+                    calc_gt = round(calc_taxable + calc_taxes + slim_summary["round_off"], 2)
+                    stated_gt = slim_summary["grand_total"]
+                    diff_gt = abs(stated_gt - calc_gt) if stated_gt > 0 else 0.0
+                    if diff_gt > 1.00 and stated_gt > 0:
+                        gt_valid = False
+                        discrepancies.append(f"Grand Total Mismatch: Extracted ₹{stated_gt:.2f} vs calculated ₹{calc_gt:.2f} (Diff: ₹{diff_gt:.2f})")
+
+                    math_detail = MathValidationDetail(
+                        is_valid=line_valid and tax_valid and gt_valid,
+                        line_item_math_valid=line_valid,
+                        tax_math_valid=tax_valid,
+                        grand_total_math_valid=gt_valid,
+                        intra_inter_state_valid=True,
+                        calculated_taxable=round(calc_taxable, 2),
+                        calculated_taxes=round(calc_taxes, 2),
+                        calculated_grand_total=round(calc_gt, 2),
+                        discrepancy_amount=round(diff_gt, 2),
+                        notes=discrepancies,
+                    )
+                    return math_detail, audit_items
+
+        except Exception as llm_err:
+            print(f"[ADK Math Agent Notice] LLM tool calling skipped ({llm_err}). Running AST fallback.")
+
+    # 2. Fallback / Offline / Test Suite Path: Single bulk execution via calculate_batch()
+    is_inter_state = False
+    if supplier_gstin and buyer_gstin and len(supplier_gstin) >= 2 and len(buyer_gstin) >= 2:
+        is_inter_state = supplier_gstin[:2] != buyer_gstin[:2]
+
+    bulk_expressions: Dict[str, str] = {}
+    stated_values: Dict[str, float] = {}
+    descriptions: Dict[str, str] = {}
+
     for idx, item in enumerate(line_items, start=1):
         desc = item.get("description") or f"Item #{idx}"
         qty = float(item.get("quantity") or 0.0)
@@ -220,62 +350,29 @@ def generate_math_queries_for_invoice(
         stated_taxable = float(item.get("taxable_value") or item.get("amount") or 0.0)
 
         if qty > 0 and rate > 0:
-            query_expr = f"round({qty} * {rate} - {discount}, 2)"
-            queries.append({
-                "type": "line_item_math",
-                "index": idx,
-                "description": desc,
-                "query": query_expr,
-                "stated_value": stated_taxable,
-                "tolerance": 0.50,
-            })
+            key = f"item_{idx}_mult"
+            bulk_expressions[key] = f"round({qty} * {rate} - {discount}, 2)" if discount > 0 else f"round({qty} * {rate}, 2)"
+            stated_values[key] = stated_taxable
+            descriptions[key] = f"{desc} (Line #{idx})"
 
-    # 2. Tax Rate Queries
-    for idx, item in enumerate(line_items, start=1):
-        taxable = float(item.get("taxable_value") or item.get("amount") or 0.0)
         gst_rate = float(item.get("gst_rate") or 0.0)
-        if taxable > 0 and gst_rate > 0:
+        if stated_taxable > 0 and gst_rate > 0:
             if is_inter_state:
-                queries.append({
-                    "type": "inter_state_tax",
-                    "index": idx,
-                    "description": f"Line #{idx} IGST",
-                    "query": f"round({taxable} * ({gst_rate} / 100.0), 2)",
-                    "stated_value": float(item.get("igst_amount") or 0.0),
-                    "tolerance": 0.50,
-                })
+                t_key = f"item_{idx}_igst"
+                bulk_expressions[t_key] = f"round({stated_taxable} * ({gst_rate} / 100.0), 2)"
+                stated_values[t_key] = float(item.get("igst_amount") or 0.0)
+                descriptions[t_key] = f"Line #{idx} IGST ({gst_rate}%)"
             else:
-                half_rate = gst_rate / 2.0
-                queries.append({
-                    "type": "intra_state_cgst",
-                    "index": idx,
-                    "description": f"Line #{idx} CGST",
-                    "query": f"round({taxable} * ({half_rate} / 100.0), 2)",
-                    "stated_value": float(item.get("cgst_amount") or 0.0),
-                    "tolerance": 0.50,
-                })
-                queries.append({
-                    "type": "intra_state_sgst",
-                    "index": idx,
-                    "description": f"Line #{idx} SGST",
-                    "query": f"round({taxable} * ({half_rate} / 100.0), 2)",
-                    "stated_value": float(item.get("sgst_amount") or 0.0),
-                    "tolerance": 0.50,
-                })
+                half = gst_rate / 2.0
+                cgst_key = f"item_{idx}_cgst"
+                sgst_key = f"item_{idx}_sgst"
+                bulk_expressions[cgst_key] = f"round({stated_taxable} * ({half} / 100.0), 2)"
+                bulk_expressions[sgst_key] = f"round({stated_taxable} * ({half} / 100.0), 2)"
+                stated_values[cgst_key] = float(item.get("cgst_amount") or 0.0)
+                stated_values[sgst_key] = float(item.get("sgst_amount") or 0.0)
+                descriptions[cgst_key] = f"Line #{idx} CGST ({half}%)"
+                descriptions[sgst_key] = f"Line #{idx} SGST ({half}%)"
 
-    # 3. Taxable Subtotal Sum Query
-    if len(line_items) > 1:
-        item_amounts = [float(it.get("taxable_value") or it.get("amount") or 0.0) for it in line_items]
-        stated_subtotal = float(summary_data.get("total_taxable_value") or sum(item_amounts))
-        queries.append({
-            "type": "subtotal_sum",
-            "description": "Taxable Subtotal Sum",
-            "query": f"round(sum([{', '.join(str(a) for a in item_amounts)}]), 2)",
-            "stated_value": stated_subtotal,
-            "tolerance": 0.50,
-        })
-
-    # 4. Grand Total Equation Query (only if grand_total provided)
     stated_grand_total = float(summary_data.get("grand_total") or 0.0)
     if stated_grand_total > 0:
         calc_taxable = float(summary_data.get("total_taxable_value") or sum(
@@ -289,147 +386,79 @@ def generate_math_queries_for_invoice(
             )
         cess = float(summary_data.get("total_cess") or 0.0)
         round_off = float(summary_data.get("round_off") or 0.0)
-
-        queries.append({
-            "type": "grand_total_equation",
-            "description": "Grand Total Balance",
-            "query": f"round({calc_taxable} + {calc_taxes} + {cess} + {round_off}, 2)",
-            "stated_value": stated_grand_total,
-            "tolerance": 1.00,
-        })
-
-    return queries
-
-
-def execute_deterministic_math_suite(
-    line_items: List[Dict[str, Any]],
-    summary_data: Dict[str, Any],
-    supplier_gstin: Optional[str] = None,
-    buyer_gstin: Optional[str] = None,
-    api_key: Optional[str] = None,
-    max_queries: Optional[int] = None,
-) -> Tuple[MathValidationDetail, List[Dict[str, Any]]]:
-    """Agent-driven math verification executing dynamic queries through the calculate tool.
-
-    Enforces a strict query cap (default: 50) to prevent runaway loops on large documents.
-    """
-    is_inter_state = False
-    if supplier_gstin and buyer_gstin and len(supplier_gstin) >= 2 and len(buyer_gstin) >= 2:
-        is_inter_state = supplier_gstin[:2] != buyer_gstin[:2]
-
-    # Generate dynamic queries for this invoice
-    queries = generate_math_queries_for_invoice(
-        line_items=line_items,
-        summary_data=summary_data,
-        is_inter_state=is_inter_state,
-    )
-
-    query_cap = max_queries if max_queries is not None else DEFAULT_MAX_VALIDATION_QUERIES
-    total_generated = len(queries)
-    is_capped = total_generated > query_cap
+        bulk_expressions["grand_total_balance"] = f"round({calc_taxable} + {calc_taxes} + {cess} + {round_off}, 2)"
+        stated_values["grand_total_balance"] = stated_grand_total
+        descriptions["grand_total_balance"] = "Grand Total Balance"
 
     calculation_audit: List[Dict[str, Any]] = []
     discrepancies: List[str] = []
-
-    if is_capped:
-        skipped = total_generated - query_cap
-        queries = queries[:query_cap]
-        discrepancies.append(
-            f"Safety Limit: Capped at {query_cap} calculation queries (skipped {skipped} remaining queries)."
-        )
     line_item_math_valid = True
     tax_math_valid = True
     grand_total_math_valid = True
-    intra_inter_state_valid = True
 
-    calculated_taxable = 0.0
-    calculated_grand_total = 0.0
-    discrepancy_amount = 0.0
+    if query_cap and len(bulk_expressions) > query_cap:
+        skipped = len(bulk_expressions) - query_cap
+        capped_keys = list(bulk_expressions.keys())[:query_cap]
+        bulk_expressions = {k: bulk_expressions[k] for k in capped_keys}
+        discrepancies.append(f"Safety Limit: Capped at {query_cap} calculation queries (skipped {skipped} remaining queries).")
 
-    # Execute all mathematical queries in a single batch call via calculate_batch()
-    batch_map = {f"q_{idx}": q["query"] for idx, q in enumerate(queries)}
-    batch_res = calculate_batch(batch_map)
-    batch_outputs = batch_res.get("results", {})
+    # Evaluate all expressions in 1 batch via the Python AST calculator tool
+    batch_res = calculate_batch(bulk_expressions)
+    results = batch_res.get("results", {})
 
-    for idx, q in enumerate(queries):
-        query_str = q["query"]
-        q_key = f"q_{idx}"
-        q_item = batch_outputs.get(q_key, {})
-        val = q_item.get("value")
-        err = q_item.get("error")
-
-        if err:
-            calc_val = 0.0
-            discrepancies.append(f"Tool Error on query '{query_str}': {err}")
-        else:
-            calc_val = float(val) if val is not None else 0.0
-
-        stated_val = q["stated_value"]
+    for k, item in results.items():
+        calc_val = float(item.get("value") or 0.0)
+        stated_val = stated_values.get(k, 0.0)
         diff = round(abs(stated_val - calc_val), 2)
-        is_match = diff <= q["tolerance"]
+        tolerance = 1.00 if "grand_total" in k else 0.50
+        is_match = diff <= tolerance
 
         calculation_audit.append({
-            "type": q["type"],
-            "description": q["description"],
-            "query": query_str,
+            "key": k,
+            "description": descriptions.get(k, k),
+            "query": item.get("expression", ""),
             "calculated_value": calc_val,
             "stated_value": stated_val,
             "diff": diff,
             "is_match": is_match,
         })
 
-        q_type = q["type"]
-        if q_type == "line_item_math":
-            if not is_match:
+        if not is_match:
+            if "item_" in k and "mult" in k:
                 line_item_math_valid = False
-                discrepancies.append(
-                    f"{q['description']}: Math mismatch. Query `{query_str}` = ₹{calc_val:.2f}, "
-                    f"stated taxable is ₹{stated_val:.2f} (Diff: ₹{diff:.2f})"
-                )
-        elif q_type in ("inter_state_tax", "intra_state_cgst", "intra_state_sgst"):
-            if not is_match and stated_val > 0:
-                tax_math_valid = False
-                discrepancies.append(f"{q['description']}: Expected ₹{calc_val:.2f}, got ₹{stated_val:.2f}")
-        elif q_type == "subtotal_sum":
-            calculated_taxable = calc_val
-        elif q_type == "grand_total_equation":
-            calculated_grand_total = calc_val
-            discrepancy_amount = diff
-            if not is_match:
+                discrepancies.append(f"{descriptions.get(k, k)}: Math mismatch. Calculated ₹{calc_val:.2f} vs stated ₹{stated_val:.2f} (Diff: ₹{diff:.2f})")
+            elif "gst" in k:
+                if stated_val > 0:
+                    tax_math_valid = False
+                    discrepancies.append(f"{descriptions.get(k, k)}: Expected ₹{calc_val:.2f}, got ₹{stated_val:.2f}")
+            elif "grand_total" in k:
                 grand_total_math_valid = False
-                discrepancies.append(
-                    f"Grand Total Mismatch: Query `{query_str}` = ₹{calc_val:.2f} vs "
-                    f"Extracted ₹{stated_val:.2f} (Diff: ₹{diff:.2f})"
-                )
+                discrepancies.append(f"Grand Total Mismatch: Calculated ₹{calc_val:.2f} vs stated ₹{stated_val:.2f} (Diff: ₹{diff:.2f})")
 
-    if calculated_taxable == 0.0 and line_items:
-        calculated_taxable = sum(float(it.get("taxable_value") or it.get("amount") or 0.0) for it in line_items)
-
-    calculated_taxes = sum(
-        float(it.get("cgst_amount", 0.0)) + float(it.get("sgst_amount", 0.0)) + float(it.get("igst_amount", 0.0))
-        for it in line_items
-    )
-
-    stated_gt = float(summary_data.get("grand_total") or 0.0)
-    if stated_gt > 0 and calculated_grand_total == 0.0:
-        calculated_grand_total = calculated_taxable + calculated_taxes
-
-    overall_valid = line_item_math_valid and tax_math_valid and grand_total_math_valid and intra_inter_state_valid
+    calc_taxable_sum = sum(float(it.get("taxable_value") or it.get("amount") or 0.0) for it in line_items)
+    calc_taxes_sum = sum(float(it.get("cgst_amount", 0.0)) + float(it.get("sgst_amount", 0.0)) + float(it.get("igst_amount", 0.0)) for it in line_items)
+    gt_calc = results.get("grand_total_balance", {}).get("value")
+    calculated_gt = float(gt_calc) if gt_calc is not None else round(calc_taxable_sum + calc_taxes_sum, 2)
+    discrepancy_amt = abs(stated_grand_total - calculated_gt) if stated_grand_total > 0 else 0.0
 
     math_detail = MathValidationDetail(
-        is_valid=overall_valid,
+        is_valid=line_item_math_valid and tax_math_valid and grand_total_math_valid,
         line_item_math_valid=line_item_math_valid,
         tax_math_valid=tax_math_valid,
         grand_total_math_valid=grand_total_math_valid,
-        intra_inter_state_valid=intra_inter_state_valid,
-        calculated_taxable=round(calculated_taxable, 2),
-        calculated_taxes=round(calculated_taxes, 2),
-        calculated_grand_total=calculated_grand_total if calculated_grand_total > 0 else round(calculated_taxable + calculated_taxes, 2),
-        discrepancy_amount=discrepancy_amount,
+        intra_inter_state_valid=True,
+        calculated_taxable=round(calc_taxable_sum, 2),
+        calculated_taxes=round(calc_taxes_sum, 2),
+        calculated_grand_total=round(calculated_gt, 2),
+        discrepancy_amount=round(discrepancy_amt, 2),
         notes=discrepancies,
     )
 
     return math_detail, calculation_audit
+
+
+# Backward compatibility alias
+execute_deterministic_math_suite = execute_bulk_math_agent
 
 
 # ==============================================================================

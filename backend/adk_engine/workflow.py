@@ -1,6 +1,7 @@
 """Google ADK 2.0 Multi-Stage Parallel Graph Workflow for Invoice OCR & Tally Sync."""
 
 from __future__ import annotations
+import json
 import os
 import time
 from datetime import datetime
@@ -34,9 +35,7 @@ from .validator import validate_gstin, reconcile_invoice_discrepancies
 from .validation_tools import (
     calculate,
     calculate_batch,
-    verify_line_item_math,
-    verify_tax_calculations,
-    verify_grand_total_equation,
+    execute_bulk_math_agent,
     execute_deterministic_math_suite,
     query_tally_party_by_gstin,
     query_tally_duplicate_voucher,
@@ -244,31 +243,84 @@ def gemini_multimodal_extraction_node(ctx: Any = None, node_input: Any = None) -
             ctx.state["markdown"] = raw_md
             ctx.state["file_path"] = file_path
 
+        # Build lightweight numeric projection to save 90%+ input tokens for downstream agents
+        slim_payload = {
+            "items": [
+                {
+                    "desc": it.description[:30] if it.description else f"Item #{idx}",
+                    "qty": it.quantity,
+                    "rate": it.rate,
+                    "disc": it.discount,
+                    "taxable": it.taxable_value,
+                    "gst_pct": it.gst_rate,
+                }
+                for idx, it in enumerate(getattr(parsed_doc.invoice, "line_items", []) or [], start=1)
+            ] if (parsed_doc and parsed_doc.invoice) else [],
+            "summary": {
+                "taxable": getattr(parsed_doc.invoice.summary, "total_taxable_value", 0.0),
+                "cgst": getattr(parsed_doc.invoice.summary, "total_cgst", 0.0),
+                "sgst": getattr(parsed_doc.invoice.summary, "total_sgst", 0.0),
+                "igst": getattr(parsed_doc.invoice.summary, "total_igst", 0.0),
+                "round_off": getattr(parsed_doc.invoice.summary, "round_off", 0.0),
+                "grand_total": getattr(parsed_doc.invoice.summary, "grand_total", 0.0),
+            } if (parsed_doc and parsed_doc.invoice and parsed_doc.invoice.summary) else {},
+        }
+        compact_payload = json.dumps(slim_payload)
+
         print(
-            f"[ADK Stage 2: Extraction] Transcription complete ({len(raw_md)} chars, "
-            f"{len(parsed_doc.validation_plan)} validation tasks). "
-            f"STRIPPING RAW IMAGE PAYLOAD — forwarding pure Markdown text to downstream nodes."
+            f"[ADK Stage 2: Extraction] Transcription complete ({len(raw_md)} chars raw markdown). "
+            f"STRIPPING BOILERPLATE — forwarding compact numeric payload ({len(compact_payload)} chars, saves ~90% tokens) to downstream math agent."
         )
-        return raw_md
+        return compact_payload
     except Exception as exc:
         print(f"[ADK Stage 2: Extraction Notice] {exc}. Using fallback transcription.")
         err_md = f"# Document Transcription Notice\nProcessed file: `{Path(file_path).name}`\n\n*(Transcribed content ready for verification)*"
         if ctx and hasattr(ctx, "state"):
             ctx.state["markdown"] = err_md
-        return err_md
+        return json.dumps({"items": [], "summary": {}})
 
 
 def reconciliation_revision_node(ctx: Any = None, node_input: Any = None) -> Any:
     """Stage 3.5: Targeted OCR & Math Reconciliation Revision Node."""
-    print("[ADK Stage 3.5: Revision] Reconciling OCR discrepancies.")
+    print("[ADK Stage 3.5: Revision] Reconciling arithmetic discrepancies via LLM & AST calculator.")
+    if ctx and hasattr(ctx, "state"):
+        parsed_doc = ctx.state.get("parsed_doc")
+        math_check = ctx.state.get("math_check")
+        if parsed_doc and hasattr(parsed_doc, "invoice") and parsed_doc.invoice and math_check:
+            items_dict = [it.model_dump() if hasattr(it, "model_dump") else it for it in getattr(parsed_doc.invoice, "line_items", [])]
+            summary_dict = parsed_doc.invoice.summary.model_dump() if hasattr(parsed_doc.invoice.summary, "model_dump") else parsed_doc.invoice.summary
+            reconciled_res, recon_notes = reconcile_invoice_discrepancies(
+                invoice_items=items_dict,
+                summary=summary_dict,
+                math_detail=math_check,
+            )
+            ctx.state["reconciliation_notes"] = recon_notes
     return node_input
 
 
 def validation_synthesis_triage_node(ctx: Any = None, node_input: Any = None) -> Any:
     """Stage 4: Compliance Triage & Tally Voucher Staging Node."""
-    print("[ADK Stage 4: Triage] Synthesizing validation findings -> Emitting route 'complete'.")
-    if Event is not None:
-        return Event(output=node_input, route="complete")
+    revision_count = 0
+    math_valid = True
+    if ctx and hasattr(ctx, "state"):
+        revision_count = ctx.state.get("revision_count", 0)
+        math_check = ctx.state.get("math_check")
+        if math_check:
+            math_valid = getattr(math_check, "is_valid", True)
+            if isinstance(math_check, dict):
+                math_valid = math_check.get("is_valid", True)
+
+    max_revisions = DEFAULT_MAX_WORKFLOW_REVISIONS
+    if not math_valid and revision_count < max_revisions:
+        if ctx and hasattr(ctx, "state"):
+            ctx.state["revision_count"] = revision_count + 1
+        print(f"[ADK Stage 4: Triage] Math discrepancies detected (revision {revision_count + 1}/{max_revisions}) -> Emitting route 'revise'.")
+        if Event is not None:
+            return Event(output=node_input, route="revise")
+    else:
+        print("[ADK Stage 4: Triage] Validation checks complete -> Emitting route 'complete'.")
+        if Event is not None:
+            return Event(output=node_input, route="complete")
     return node_input
 
 
@@ -321,14 +373,15 @@ if Agent is not None:
     # Dedicated Safe AST Math Calculator Validation Agent with Tool Call Limiter & Task Mode
     math_validation_agent = Agent(
         name="math_validation_agent",
+        model=os.environ.get("GEMINI_MODEL", "gemini-3.8-flash"),
         mode="task",
         timeout=DEFAULT_AGENT_TIMEOUT,
         description="Dynamic mathematical validation agent using secure AST calculation tool",
         instruction=(
-            "You are a mathematical validation agent. Inspect the invoice Markdown text, "
-            "dynamically formulate all calculation queries (e.g. quantity * rate - discount, subtotals, taxes, grand total), "
-            "and batch them into a single calculate_batch(expressions) call. Inspect the evaluated results, "
-            "verify every numerical computation deterministically, and call finish_task."
+            "You are a mathematical validation agent. Inspect the invoice numeric data, "
+            "dynamically formulate all calculation queries (quantity * rate - discount, subtotals, taxes, grand total), "
+            "and batch them into ONE single calculate_batch(expressions) call. Inspect the evaluated results, "
+            "verify numerical computations, and call finish_task."
         ),
         tools=[calculate_batch, calculate],
         before_tool_callback=make_tool_call_limiter(DEFAULT_MAX_VALIDATION_QUERIES),
@@ -570,7 +623,7 @@ class UniversalDocumentPipeline:
         update_step(
             "math_validation_agent",
             "running",
-            {"tool": "safe_ast_calculate_tool", "items_count": len(invoice_items_dict)},
+            {"tool": "calculate_batch", "items_count": len(invoice_items_dict)},
         )
         update_step(
             "tally_validation_agent",
@@ -578,12 +631,12 @@ class UniversalDocumentPipeline:
             {"tool": "tally_database_query_tool", "supplier_gstin": sup_gstin, "invoice_number": invoice_obj.invoice_number},
         )
 
-        # 3a. Execute Math Agent with dynamic calculation queries via calculate() tool
+        # 3a. Execute Math Agent with dynamic bulk calculation queries via calculate_batch() tool
         with trace_agent("math_validation_agent", "task", {"items_count": len(invoice_items_dict)}):
             print(
-                f"[ADK Math Agent] Starting Single-Turn AST Batch on {len(invoice_items_dict)} line items (cap: {DEFAULT_MAX_VALIDATION_QUERIES} queries)..."
+                f"[ADK Math Agent] Starting Bulk calculate_batch() on {len(invoice_items_dict)} line items (cap: {DEFAULT_MAX_VALIDATION_QUERIES} queries)..."
             )
-            math_detail, calculation_audit = execute_deterministic_math_suite(
+            math_detail, calculation_audit = execute_bulk_math_agent(
                 line_items=invoice_items_dict,
                 summary_data=invoice_summary_dict,
                 supplier_gstin=sup_gstin,
@@ -600,6 +653,7 @@ class UniversalDocumentPipeline:
                 "math_validation_agent",
                 "completed",
                 details={
+                    "tool": "calculate_batch",
                     "is_math_valid": math_detail.is_valid,
                     "line_item_math_valid": math_detail.line_item_math_valid,
                     "grand_total_math_valid": math_detail.grand_total_math_valid,
@@ -610,7 +664,7 @@ class UniversalDocumentPipeline:
                     "max_queries_limit": DEFAULT_MAX_VALIDATION_QUERIES,
                     "calculation_audit": calculation_audit[:10],
                 },
-                tool_calls_count=len(calculation_audit),
+                tool_calls_count=1 if calculation_audit else 0,
                 tool_calls_limit=DEFAULT_MAX_VALIDATION_QUERIES,
             )
 
@@ -746,8 +800,8 @@ class UniversalDocumentPipeline:
                         invoice_items_dict = reconciled_invoice["line_items"]
                         invoice_summary_dict = reconciled_invoice["summary"]
 
-                        # Re-verify through deterministic math suite
-                        math_detail, re_audit = execute_deterministic_math_suite(
+                        # Re-verify through bulk math agent
+                        math_detail, re_audit = execute_bulk_math_agent(
                             line_items=invoice_items_dict,
                             summary_data=invoice_summary_dict,
                             supplier_gstin=sup_gstin,

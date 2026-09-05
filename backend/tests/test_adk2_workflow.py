@@ -1,6 +1,7 @@
 """Unit and integration tests for ADK 2.0 Parallel Workflow and Deterministic Validation Tools."""
 
 import unittest
+from pathlib import Path
 from backend.adk_engine.models import (
     ExtractedInvoice,
     InvoiceParty,
@@ -10,7 +11,8 @@ from backend.adk_engine.models import (
 )
 from backend.adk_engine.validation_tools import (
     calculate,
-    generate_math_queries_for_invoice,
+    calculate_batch,
+    execute_bulk_math_agent,
     verify_line_item_math,
     verify_tax_calculations,
     verify_grand_total_equation,
